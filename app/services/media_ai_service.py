@@ -1,68 +1,85 @@
-import base64
+import asyncio
 from typing import Any, List, NoReturn, Optional
 
-from langchain_openai import ChatOpenAI
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
-from app.clients.http_client import HttpClientFactory
 from app.logging import logger
 from settings import config
 
 
 class GeminiMultimodalService:
     @classmethod
-    def _client(cls: type['GeminiMultimodalService']) -> ChatOpenAI:
+    def _native_base_url(cls: type['GeminiMultimodalService']) -> str:
+        native_base_url = config.gemini.native_base_url
+        if native_base_url:
+            return native_base_url.rstrip('/')
+        return config.gemini.base_url.removesuffix('/v1').rstrip('/')
+
+    @classmethod
+    def _client(cls: type['GeminiMultimodalService']) -> genai.Client:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для обработки media.')
-        return ChatOpenAI(
-            model=config.gemini.model,
+        return genai.Client(
             api_key=config.gemini.api_key,
-            base_url=config.gemini.base_url,
-            temperature=0,
-            http_client=HttpClientFactory.get_httpx_proxy_client('gemini'),
-            http_async_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
+            http_options=types.HttpOptions(base_url=cls._native_base_url()),
         )
 
     @classmethod
-    def _audio_client(cls: type['GeminiMultimodalService']) -> AsyncOpenAI:
-        if not config.gemini.api_key:
-            raise ValueError('Не задан GEMINI_API_KEY для распознавания audio.')
-        return AsyncOpenAI(
-            api_key=config.gemini.api_key,
-            base_url=config.gemini.base_url,
-            http_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
-        )
-
-    @classmethod
-    def _raise_provider_error(cls: type['GeminiMultimodalService'], error: Exception) -> NoReturn:
+    def _raise_provider_error(
+        cls: type['GeminiMultimodalService'],
+        error: Exception,
+    ) -> NoReturn:
         status_code = getattr(error, 'status_code', None)
-        response = getattr(error, 'response', None)
-        status_code = status_code or getattr(response, 'status_code', None)
         error_text = str(error).casefold()
+        logger.exception(
+            'gemini_multimodal_provider_error status=%s error=%s',
+            status_code,
+            error,
+        )
         if status_code in {400, 401, 403} or 'api key' in error_text or 'unauthorized' in error_text:
             raise ValueError(
-                'LiteLLM отклонил запрос media. Проверьте GEMINI_API_KEY, GEMINI_BASE_URL '
-                'и модели GEMINI_MODEL/GEMINI_TRANSCRIPTION_MODEL в окружении Celery worker.'
+                'Gemini отклонил запрос media. Проверьте GEMINI_API_KEY, '
+                'GEMINI_NATIVE_BASE_URL и GEMINI_MODEL в окружении Celery worker.'
             ) from error
         raise error
 
     @classmethod
-    async def _invoke(
+    def _generate_text_sync(
         cls: type['GeminiMultimodalService'],
-        content: List[dict[str, Any]],
+        contents: Any,
     ) -> str:
         try:
-            response = await cls._client().ainvoke([('user', content)])
+            response = cls._client().models.generate_content(
+                model=config.gemini.model,
+                contents=contents,
+            )
         except Exception as error:
             cls._raise_provider_error(error)
-        if isinstance(response.content, str):
-            text = response.content
-        else:
-            text = ' '.join(str(part.get('text', part)) if isinstance(part, dict) else str(part) for part in response.content)
-        result = text.strip()
+
+        response_text = getattr(response, 'text', None)
+        if response_text:
+            return response_text.strip()
+
+        text_parts: List[str] = []
+        for candidate in getattr(response, 'candidates', None) or []:
+            content = getattr(candidate, 'content', None)
+            for part in getattr(content, 'parts', None) or []:
+                part_text = getattr(part, 'text', None)
+                if part_text:
+                    text_parts.append(part_text)
+
+        result = ' '.join(text_parts).strip()
         if not result:
-            raise ValueError('LiteLLM не вернул текстовый результат')
+            raise ValueError('Gemini не вернул текстовый результат')
         return result
+
+    @classmethod
+    async def _generate_text(
+        cls: type['GeminiMultimodalService'],
+        contents: Any,
+    ) -> str:
+        return await asyncio.to_thread(cls._generate_text_sync, contents)
 
     @classmethod
     async def transcribe_audio(
@@ -71,21 +88,11 @@ class GeminiMultimodalService:
         mime_type: str,
     ) -> str:
         logger.info('gemini_audio_transcription_started bytes=%s mime=%s', len(data), mime_type)
-        filename = 'audio.wav' if mime_type in {'audio/wav', 'audio/x-wav'} else 'audio.mp3'
-        model = config.gemini.transcription_model or config.gemini.model
-        try:
-            response = await cls._audio_client().audio.transcriptions.create(
-                model=model,
-                file=(filename, data, mime_type),
-                response_format='text',
-                prompt='Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
-            )
-        except Exception as error:
-            cls._raise_provider_error(error)
-        text = response if isinstance(response, str) else str(getattr(response, 'text', '') or '')
-        text = text.strip()
-        if not text:
-            raise ValueError('Artemox не вернул текст транскрибации')
+        contents = [
+            'Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
+            types.Part.from_bytes(data=data, mime_type=mime_type),
+        ]
+        text = await cls._generate_text(contents)
         logger.info('gemini_audio_transcription_completed chars=%s', len(text))
         return text
 
@@ -96,14 +103,12 @@ class GeminiMultimodalService:
         mime_type: str,
     ) -> str:
         logger.info('gemini_image_description_started bytes=%s mime=%s', len(data), mime_type)
-        data_url = f'data:{mime_type};base64,{base64.b64encode(data).decode("ascii")}'
-        text = await cls._invoke([
-            {
-                'type': 'text',
-                'text': 'Кратко опиши изображение для контекста личного диалога. Не придумывай факты, 2-4 предложения.',
-            },
-            {'type': 'image_url', 'image_url': {'url': data_url}},
-        ])
+        contents = [
+            'Кратко опиши изображение для контекста личного диалога. '
+            'Не придумывай факты, 2-4 предложения.',
+            types.Part.from_bytes(data=data, mime_type=mime_type),
+        ]
+        text = await cls._generate_text(contents)
         logger.info('gemini_image_description_completed chars=%s', len(text))
         return text
 
@@ -115,20 +120,18 @@ class GeminiMultimodalService:
     ) -> str:
         if not frames:
             return 'Видео не содержит доступных кадров.'
+
         logger.info('gemini_video_description_started frames=%s', len(frames))
         prompt = (
             'Кратко опиши, что происходит на видео по выбранным кадрам. '
-            'Не придумывай события между кадрами. Учитывай транскрипт аудио, если он есть. 2-5 предложений.\n'
+            'Не придумывай события между кадрами. Учитывай транскрипт аудио, если он есть. '
+            '2-5 предложений.\n'
             f'Транскрипт аудио: {audio_transcript or "отсутствует"}'
         )
-        contents: List[dict[str, Any]] = [{'type': 'text', 'text': prompt}]
-        contents.extend(
-            {
-                'type': 'image_url',
-                'image_url': {'url': f'data:image/jpeg;base64,{base64.b64encode(frame).decode("ascii")}'},
-            }
-            for frame in frames
-        )
-        text = await cls._invoke(contents)
+        contents: List[Any] = [prompt]
+        for frame in frames:
+            contents.append(types.Part.from_bytes(data=frame, mime_type='image/jpeg'))
+
+        text = await cls._generate_text(contents)
         logger.info('gemini_video_description_completed chars=%s', len(text))
         return text
