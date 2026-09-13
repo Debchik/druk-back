@@ -96,38 +96,28 @@ class GeminiSpeechService:
                     raise ValueError(
                         f'Artemox TTS HTTP {response.status_code}: {error_body}'
                     )
-                event_lines: List[str] = []
                 pending_payload = ''
                 for raw_line in response.iter_lines():
                     line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
                     line = line.strip()
-                    if not line.strip():
-                        payload = ''.join(event_lines).strip()
-                        pending_payload += payload
-                        chunk, finished, complete = cls._parse_sse_event([pending_payload])
-                        audio_chunks.extend(chunk)
-                        event_lines = []
-                        if complete:
-                            pending_payload = ''
-                        if finished and complete:
-                            break
+                    if not line:
                         continue
                     if line.startswith('data:'):
-                        event_lines.append(line[5:].lstrip())
+                        pending_payload += line[5:].lstrip()
+                        chunk, finished, complete = cls._parse_sse_event([pending_payload])
+                        if complete:
+                            audio_chunks.extend(chunk)
+                            pending_payload = ''
+                            if finished:
+                                break
                     elif line.startswith(('event:', 'id:', 'retry:')):
                         continue
-                    else:
-                        event_lines.append(line)
-                if event_lines:
-                    pending_payload += ''.join(event_lines).strip()
-                    chunk, _, complete = cls._parse_sse_event([pending_payload])
-                    audio_chunks.extend(chunk)
-                    if not complete:
-                        logger.warning(
-                            'gemini_speech_sse_incomplete_event chars=%s preview=%s',
-                            len(pending_payload),
-                            pending_payload[:200],
-                        )
+                if pending_payload:
+                    logger.warning(
+                        'gemini_speech_sse_incomplete_event chars=%s preview=%s',
+                        len(pending_payload),
+                        pending_payload[:200],
+                    )
         logger.info('gemini_speech_http_completed bytes=%s', len(audio_chunks))
         if not audio_chunks:
             raise ValueError('Gemini не вернул аудио в streamGenerateContent')
