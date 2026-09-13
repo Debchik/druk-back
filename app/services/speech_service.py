@@ -1,10 +1,11 @@
 import asyncio
 import base64
-import json
 import subprocess
-from typing import Any, Dict, List, NoReturn, Tuple
+from typing import NoReturn
 
-from app.clients.http_client import HttpClientFactory
+from google import genai
+from google.genai import types
+
 from app.logging import logger
 from settings import config
 
@@ -15,14 +16,7 @@ class GeminiSpeechService:
         status_code = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         error_text = str(error).casefold()
         logger.error('gemini_speech_provider_error status=%s error=%s', status_code, error)
-        if (
-            status_code in {400, 401, 403}
-            or '400 bad request' in error_text
-            or '401 unauthorized' in error_text
-            or '403 forbidden' in error_text
-            or 'api key' in error_text
-            or 'unauthorized' in error_text
-        ):
+        if status_code in {400, 401, 403} or 'api key' in error_text or 'unauthorized' in error_text:
             raise ValueError(
                 'Artemox отклонил Gemini TTS-запрос. Проверьте GEMINI_API_KEY, '
                 'GEMINI_NATIVE_BASE_URL, GEMINI_TTS_MODEL и GEMINI_TTS_VOICE.'
@@ -41,7 +35,7 @@ class GeminiSpeechService:
             config.gemini.tts_voice,
         )
         try:
-            pcm_audio = await asyncio.to_thread(cls._request_pcm, clean_text)
+            pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text)
             logger.info('gemini_speech_pcm_received bytes=%s', len(pcm_audio))
             audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, pcm_audio)
             logger.info('gemini_speech_ogg_converted bytes=%s', len(audio))
@@ -53,101 +47,41 @@ class GeminiSpeechService:
         return audio
 
     @classmethod
-    def _request_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
+    def _generate_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
-        url = (
-            f'{cls._native_base_url()}/v1beta/models/'
-            f'{config.gemini.tts_model}:streamGenerateContent?alt=sse'
+        client = genai.Client(
+            api_key=config.gemini.api_key,
+            http_options=types.HttpOptions(
+                base_url=cls._native_base_url(),
+            ),
         )
-        payload: Dict[str, Any] = {
-            'model': config.gemini.tts_model,
-            'contents': [{'role': 'user', 'parts': [{'text': text}]}],
-            'generationConfig': {
-                'responseModalities': ['AUDIO'],
-                'speechConfig': {
-                    'voiceConfig': {
-                        'prebuiltVoiceConfig': {
-                            'voiceName': config.gemini.tts_voice,
-                        }
-                    }
-                },
-            },
-        }
-        logger.info('gemini_speech_http_started url=%s', url)
-        audio_chunks = bytearray()
-        with HttpClientFactory.get_httpx_proxy_client('gemini', timeout=120.0) as client:
-            with client.stream(
-                'POST',
-                url,
-                headers={
-                    'x-goog-api-key': config.gemini.api_key,
-                    'Content-Type': 'application/json',
-                },
-                json=payload,
-            ) as response:
-                logger.info(
-                    'gemini_speech_http_started status=%s content_type=%s',
-                    response.status_code,
-                    response.headers.get('content-type', ''),
-                )
-                if response.is_error:
-                    error_body = response.read().decode('utf-8', errors='replace')[:2000]
-                    raise ValueError(
-                        f'Artemox TTS HTTP {response.status_code}: {error_body}'
+        response = client.models.generate_content(
+            model=config.gemini.tts_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=['AUDIO'],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=config.gemini.tts_voice,
+                        )
                     )
-                pending_payload = ''
-                for raw_line in response.iter_lines():
-                    line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if line.startswith('data:'):
-                        pending_payload += line[5:].lstrip()
-                        chunk, finished, complete = cls._parse_sse_event([pending_payload])
-                        if complete:
-                            audio_chunks.extend(chunk)
-                            pending_payload = ''
-                            if finished:
-                                break
-                    elif line.startswith(('event:', 'id:', 'retry:')):
-                        continue
-                if pending_payload:
-                    logger.warning(
-                        'gemini_speech_sse_incomplete_event chars=%s preview=%s',
-                        len(pending_payload),
-                        pending_payload[:200],
-                    )
-        logger.info('gemini_speech_http_completed bytes=%s', len(audio_chunks))
-        if not audio_chunks:
-            raise ValueError('Gemini не вернул аудио в streamGenerateContent')
-        return bytes(audio_chunks)
-
-    @classmethod
-    def _parse_sse_event(
-        cls: type['GeminiSpeechService'],
-        event_lines: List[str],
-    ) -> Tuple[bytes, bool, bool]:
-        payload = ''.join(event_lines).strip()
-        if not payload:
-            return b'', False, True
-        if payload == '[DONE]':
-            return b'', True, True
-        try:
-            response_data: Dict[str, Any] = json.loads(payload)
-        except json.JSONDecodeError:
-            return b'', False, False
-        audio = bytearray()
-        finished = False
-        for candidate in response_data.get('candidates', []):
-            finished = finished or bool(candidate.get('finishReason'))
-            content = candidate.get('content') or {}
-            for part in content.get('parts', []):
-                inline_data = part.get('inlineData') or part.get('inline_data') or {}
-                encoded_audio = inline_data.get('data')
-                if encoded_audio:
-                    audio.extend(base64.b64decode(encoded_audio))
-        return bytes(audio), finished, True
+                ),
+            ),
+        )
+        for candidate in response.candidates or []:
+            content = candidate.content
+            if content is None:
+                continue
+            for part in content.parts or []:
+                inline_data = part.inline_data
+                if inline_data is None or inline_data.data is None:
+                    continue
+                if isinstance(inline_data.data, bytes):
+                    return inline_data.data
+                return base64.b64decode(inline_data.data)
+        raise ValueError('Gemini не вернул inline audio data')
 
     @classmethod
     def _native_base_url(cls: type['GeminiSpeechService']) -> str:
