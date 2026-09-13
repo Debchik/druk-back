@@ -97,14 +97,19 @@ class GeminiSpeechService:
                         f'Artemox TTS HTTP {response.status_code}: {error_body}'
                     )
                 event_lines: List[str] = []
+                pending_payload = ''
                 for raw_line in response.iter_lines():
                     line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
                     line = line.strip()
                     if not line.strip():
-                        chunk, finished = cls._parse_sse_event(event_lines)
+                        payload = ''.join(event_lines).strip()
+                        pending_payload += payload
+                        chunk, finished, complete = cls._parse_sse_event([pending_payload])
                         audio_chunks.extend(chunk)
                         event_lines = []
-                        if finished:
+                        if complete:
+                            pending_payload = ''
+                        if finished and complete:
                             break
                         continue
                     if line.startswith('data:'):
@@ -114,8 +119,15 @@ class GeminiSpeechService:
                     else:
                         event_lines.append(line)
                 if event_lines:
-                    chunk, _ = cls._parse_sse_event(event_lines)
+                    pending_payload += ''.join(event_lines).strip()
+                    chunk, _, complete = cls._parse_sse_event([pending_payload])
                     audio_chunks.extend(chunk)
+                    if not complete:
+                        logger.warning(
+                            'gemini_speech_sse_incomplete_event chars=%s preview=%s',
+                            len(pending_payload),
+                            pending_payload[:200],
+                        )
         logger.info('gemini_speech_http_completed bytes=%s', len(audio_chunks))
         if not audio_chunks:
             raise ValueError('Gemini не вернул аудио в streamGenerateContent')
@@ -125,21 +137,16 @@ class GeminiSpeechService:
     def _parse_sse_event(
         cls: type['GeminiSpeechService'],
         event_lines: List[str],
-    ) -> Tuple[bytes, bool]:
-        payload = '\n'.join(event_lines).strip()
+    ) -> Tuple[bytes, bool, bool]:
+        payload = ''.join(event_lines).strip()
         if not payload:
-            return b'', False
+            return b'', False, True
         if payload == '[DONE]':
-            return b'', True
+            return b'', True, True
         try:
             response_data: Dict[str, Any] = json.loads(payload)
         except json.JSONDecodeError:
-            logger.warning(
-                'gemini_speech_sse_invalid_event chars=%s preview=%s',
-                len(payload),
-                payload[:200],
-            )
-            return b'', False
+            return b'', False, False
         audio = bytearray()
         finished = False
         for candidate in response_data.get('candidates', []):
@@ -150,7 +157,7 @@ class GeminiSpeechService:
                 encoded_audio = inline_data.get('data')
                 if encoded_audio:
                     audio.extend(base64.b64decode(encoded_audio))
-        return bytes(audio), finished
+        return bytes(audio), finished, True
 
     @classmethod
     def _native_base_url(cls: type['GeminiSpeechService']) -> str:
