@@ -99,6 +99,7 @@ class GeminiSpeechService:
                 event_lines: List[str] = []
                 for raw_line in response.iter_lines():
                     line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
+                    line = line.strip()
                     if not line.strip():
                         chunk, finished = cls._parse_sse_event(event_lines)
                         audio_chunks.extend(chunk)
@@ -108,6 +109,8 @@ class GeminiSpeechService:
                         continue
                     if line.startswith('data:'):
                         event_lines.append(line[5:].lstrip())
+                    elif line.startswith(('event:', 'id:', 'retry:')):
+                        continue
                     else:
                         event_lines.append(line)
                 if event_lines:
@@ -131,7 +134,11 @@ class GeminiSpeechService:
         try:
             response_data: Dict[str, Any] = json.loads(payload)
         except json.JSONDecodeError:
-            logger.warning('gemini_speech_sse_invalid_event chars=%s', len(payload))
+            logger.warning(
+                'gemini_speech_sse_invalid_event chars=%s preview=%s',
+                len(payload),
+                payload[:200],
+            )
             return b'', False
         audio = bytearray()
         finished = False
