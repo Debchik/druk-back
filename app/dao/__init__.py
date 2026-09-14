@@ -7,5 +7,6 @@ from app.dao.onboarding_dao import OnboardingDao
 from app.dao.user_dao import UserDao
 from app.dao.telegram_link_token_dao import TelegramLinkTokenDao
 from app.dao.user_profile_dao import UserProfileDao
+from app.dao.proactive_message_dao import ProactiveMessageDao
 
-__all__ = ['BoyfriendDao', 'CharacterVersionDao', 'ChatDao', 'MediaAssetDao', 'MessageDao', 'OnboardingDao', 'TelegramLinkTokenDao', 'UserDao', 'UserProfileDao']
+__all__ = ['BoyfriendDao', 'CharacterVersionDao', 'ChatDao', 'MediaAssetDao', 'MessageDao', 'OnboardingDao', 'ProactiveMessageDao', 'TelegramLinkTokenDao', 'UserDao', 'UserProfileDao']

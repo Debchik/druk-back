@@ -60,6 +60,15 @@ class CeleryConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='CELERY_', env_file='.env', extra='ignore')
 
 
+class ProactiveConfig(BaseSettings):
+    enabled: bool = True
+    scan_interval_seconds: int = 600
+    scan_batch_size: int = 100
+    follow_up_delay_minutes: int = 180
+    return_after_hours: int = 24
+    model_config = SettingsConfigDict(env_prefix='PROACTIVE_', env_file='.env', extra='ignore')
+
+
 class LoggingConfig(BaseSettings):
     level: str = 'INFO'
     file_path: str = 'logs/app.log'
@@ -93,6 +102,7 @@ class Settings(BaseSettings):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
+    proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
