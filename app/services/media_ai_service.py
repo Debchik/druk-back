@@ -50,7 +50,8 @@ class GeminiMultimodalService:
         contents: Any,
     ) -> str:
         try:
-            response = cls._client().models.generate_content(
+            client = cls._client()
+            response = client.models.generate_content(
                 model=config.gemini.model,
                 contents=contents,
             )
