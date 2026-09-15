@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.message_dao import MessageDao
 from app.dao.proactive_message_dao import ProactiveMessageDao
+from app.dao.character_version_dao import CharacterVersionDao
 from app.logging import logger
 from app.models.chat import Chat
 from app.models.message import Message
@@ -14,6 +15,7 @@ from app.models.proactive_message import ProactiveMessage
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.services.gemini_service import GeminiAIService
+from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.redis_task_service import RedisTaskService
 from settings import config
 
@@ -156,6 +158,11 @@ class ProactiveMessageService:
             await db.commit()
             return proactive_message
         chat, user, profile = context
+        character = await CharacterVersionDao.get_active(db, chat.boyfriend_id)
+        if character is None:
+            await ProactiveMessageDao.mark_skipped(db, proactive_message, 'active character not found')
+            await db.commit()
+            return proactive_message
         now = cls._now()
         if proactive_message.reason != 'reminder' and await cls._candidate_reason(db, chat, user, profile, now) != proactive_message.reason:
             await ProactiveMessageDao.mark_skipped(db, proactive_message, 'conditions changed before send')
@@ -170,12 +177,20 @@ class ProactiveMessageService:
                 for item in history[-8:]
                 if item.status == 'completed' and item.role in {'user', 'assistant'}
             ]
+            character_context = (
+                'Соблюдай активную модель персонажа, его стиль и границы. '
+                'Критические настройки персонажа важнее общих инструкций.\n\n'
+                + character.system_prompt
+                + GenderAndAddressingService.build_context(profile, character)
+            )
             if proactive_message.reason == 'reminder':
                 original_message = None
                 if proactive_message.source_message_id is not None:
                     original_message = await MessageDao.get_by_id(db, proactive_message.source_message_id)
                 original_text = original_message.content if original_message is not None else proactive_message.content
                 system_prompt = (
+                    character_context
+                    + '\n\n'
                     'Сейчас наступило время ранее запланированного напоминания. '
                     'Ответь пользователю живо и естественно, как внимательный компаньон. '
                     'Не утверждай, что ты реальный человек, не говори о технических ограничениях '
@@ -186,6 +201,8 @@ class ProactiveMessageService:
                 )
             else:
                 system_prompt = (
+                    character_context
+                    + '\n\n'
                     'Ты отправляешь короткое ненавязчивое проактивное сообщение пользователю. '
                     'Не утверждай, что ты реальный человек. Не дави и не используй манипуляции. '
                     'Ответь на языке пользователя, максимум 2 предложения. '
