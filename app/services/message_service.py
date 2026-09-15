@@ -18,6 +18,7 @@ from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.memory_service import MemoryService
 from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
+from app.services.reminder_service import ReminderService
 
 
 class MessageService:
@@ -165,6 +166,7 @@ class MessageService:
         await db.commit()
         await db.refresh(message)
         try:
+            reminder = await ReminderService.analyze_and_schedule(db, chat, profile, message)
             history = await MessageDao.list_for_chat(db, chat.id)
             context = MemoryService.select_context(
                 [item for item in history if item.status == 'completed'] + [message],
@@ -181,6 +183,13 @@ class MessageService:
                 + character.system_prompt
                 + GenderAndAddressingService.build_context(profile, character)
             )
+            if reminder is not None:
+                system_prompt += (
+                    '\n\nСистемное событие: напоминание успешно создано и поставлено в очередь. '
+                    f'Оно будет отправлено пользователю в запланированное время: {reminder.scheduled_at.isoformat()} UTC. '
+                    'Обязательно подтверди пользователю, что ты напомнишь ему. Не говори, что у тебя нет технической возможности '
+                    'отправлять сообщения по расписанию.'
+                )
             reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)

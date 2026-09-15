@@ -157,7 +157,7 @@ class ProactiveMessageService:
             return proactive_message
         chat, user, profile = context
         now = cls._now()
-        if await cls._candidate_reason(db, chat, user, profile, now) != proactive_message.reason:
+        if proactive_message.reason != 'reminder' and await cls._candidate_reason(db, chat, user, profile, now) != proactive_message.reason:
             await ProactiveMessageDao.mark_skipped(db, proactive_message, 'conditions changed before send')
             await db.commit()
             return proactive_message
@@ -167,15 +167,30 @@ class ProactiveMessageService:
             history = await MessageDao.list_for_chat(db, chat.id)
             prompt_messages = [
                 {'role': item.role, 'content': item.content}
-                for item in history[-6:]
+                for item in history[-8:]
                 if item.status == 'completed' and item.role in {'user', 'assistant'}
             ]
-            system_prompt = (
-                'Ты отправляешь короткое ненавязчивое проактивное сообщение пользователю. '
-                'Не утверждай, что ты реальный человек. Не дави и не используй манипуляции. '
-                'Ответь на языке пользователя, максимум 2 предложения. '
-                f'Причина сообщения: {proactive_message.reason}.'
-            )
+            if proactive_message.reason == 'reminder':
+                original_message = None
+                if proactive_message.source_message_id is not None:
+                    original_message = await MessageDao.get_by_id(db, proactive_message.source_message_id)
+                original_text = original_message.content if original_message is not None else proactive_message.content
+                system_prompt = (
+                    'Сейчас наступило время ранее запланированного напоминания. '
+                    'Ответь пользователю живо и естественно, как внимательный компаньон. '
+                    'Не утверждай, что ты реальный человек, не говори о технических ограничениях '
+                    'и не утверждай, что пользователь уже выполнил действие. '
+                    'Сформулируй короткое напоминание на языке пользователя, максимум 2 предложения.\n'
+                    f'Изначальная просьба пользователя: {original_text}\n'
+                    f'Краткое содержание напоминания: {proactive_message.content}'
+                )
+            else:
+                system_prompt = (
+                    'Ты отправляешь короткое ненавязчивое проактивное сообщение пользователю. '
+                    'Не утверждай, что ты реальный человек. Не дави и не используй манипуляции. '
+                    'Ответь на языке пользователя, максимум 2 предложения. '
+                    f'Причина сообщения: {proactive_message.reason}.'
+                )
             reply = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
             assistant = await MessageDao.create(
                 db,

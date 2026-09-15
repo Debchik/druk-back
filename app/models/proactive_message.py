@@ -21,10 +21,16 @@ class ProactiveMessage(Base):
     chat_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), sa.ForeignKey('chats.id', ondelete='CASCADE'), index=True)
     reason: Mapped[str] = mapped_column(sa.String(40))
     deduplication_key: Mapped[str] = mapped_column(sa.String(255))
+    content: Mapped[str] = mapped_column(sa.Text, default='')
     scheduled_at: Mapped[datetime] = mapped_column(sa.DateTime, index=True)
     status: Mapped[str] = mapped_column(sa.String(20), default='queued', index=True)
     celery_task_id: Mapped[Optional[str]] = mapped_column(sa.String(255), nullable=True)
     assistant_message_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        sa.ForeignKey('messages.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    source_message_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True),
         sa.ForeignKey('messages.id', ondelete='SET NULL'),
         nullable=True,

@@ -38,14 +38,18 @@ class ProactiveMessageDao:
         reason: str,
         deduplication_key: str,
         scheduled_at: datetime,
+        content: str = '',
+        source_message_id: Optional[UUID] = None,
     ) -> ProactiveMessage:
         proactive_message = ProactiveMessage(
             user_id=user_id,
             chat_id=chat_id,
             reason=reason,
             deduplication_key=deduplication_key,
+            content=content,
             scheduled_at=scheduled_at,
             status='queued',
+            source_message_id=source_message_id,
         )
         db.add(proactive_message)
         await db.flush()
