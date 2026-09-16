@@ -61,7 +61,10 @@ class TelegramService:
             return
         logger.info('telegram_send_started chat_suffix=%s text_chars=%s', str(chat_id)[-4:], len(text))
         try:
-            await asyncio.to_thread(cls._send_message, chat_id, text, reply_markup)
+            text_parts = cls._split_message(text)
+            for index, text_part in enumerate(text_parts):
+                current_markup = reply_markup if index == len(text_parts) - 1 else None
+                await asyncio.to_thread(cls._send_message, chat_id, text_part, current_markup)
         except Exception:
             logger.exception('telegram_send_failed chat_suffix=%s', str(chat_id)[-4:])
             raise
@@ -72,7 +75,29 @@ class TelegramService:
         payload: Dict[str, Any] = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup
-        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json=payload, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage',
+            json=payload,
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.error(
+                'telegram_api_error status=%s chat_suffix=%s text_chars=%s response=%s',
+                response.status_code,
+                str(chat_id)[-4:],
+                len(text),
+                response.text[:1000],
+            )
+        response.raise_for_status()
+
+    @classmethod
+    def _split_message(cls: type['TelegramService'], text: str) -> List[str]:
+        max_length = 4096
+        if len(text) <= max_length:
+            return [text]
+        logger.warning('telegram_message_split text_chars=%s', len(text))
+        return [text[index:index + max_length] for index in range(0, len(text), max_length)]
 
     @classmethod
     async def send_assistant_response(
