@@ -50,38 +50,46 @@ class GeminiSpeechService:
     def _generate_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
+        client_args = {}
+        if config.gemini.proxy_url:
+            client_args['proxy'] = config.gemini.proxy_url
         client = genai.Client(
             api_key=config.gemini.api_key,
             http_options=types.HttpOptions(
                 base_url=cls._native_base_url(),
+                timeout=120000,
+                client_args=client_args,
             ),
         )
-        response = client.models.generate_content(
-            model=config.gemini.tts_model,
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=['AUDIO'],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=config.gemini.tts_voice,
+        try:
+            response = client.models.generate_content(
+                model=config.gemini.tts_model,
+                contents=text,
+                config=types.GenerateContentConfig(
+                    response_modalities=['AUDIO'],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=config.gemini.tts_voice,
+                            )
                         )
-                    )
+                    ),
                 ),
-            ),
-        )
-        for candidate in response.candidates or []:
-            content = candidate.content
-            if content is None:
-                continue
-            for part in content.parts or []:
-                inline_data = part.inline_data
-                if inline_data is None or inline_data.data is None:
+            )
+            for candidate in response.candidates or []:
+                content = candidate.content
+                if content is None:
                     continue
-                if isinstance(inline_data.data, bytes):
-                    return inline_data.data
-                return base64.b64decode(inline_data.data)
-        raise ValueError('Gemini не вернул inline audio data')
+                for part in content.parts or []:
+                    inline_data = part.inline_data
+                    if inline_data is None or inline_data.data is None:
+                        continue
+                    if isinstance(inline_data.data, bytes):
+                        return inline_data.data
+                    return base64.b64decode(inline_data.data)
+            raise ValueError('Gemini не вернул inline audio data')
+        finally:
+            client.close()
 
     @classmethod
     def _native_base_url(cls: type['GeminiSpeechService']) -> str:

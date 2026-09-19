@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Any, List, NoReturn, Optional
 
 from google import genai
@@ -20,9 +21,16 @@ class GeminiMultimodalService:
     def _client(cls: type['GeminiMultimodalService']) -> genai.Client:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для обработки media.')
+        client_args = {}
+        if config.gemini.proxy_url:
+            client_args['proxy'] = config.gemini.proxy_url
         return genai.Client(
             api_key=config.gemini.api_key,
-            http_options=types.HttpOptions(base_url=cls._native_base_url()),
+            http_options=types.HttpOptions(
+                base_url=cls._native_base_url(),
+                timeout=120000,
+                client_args=client_args,
+            ),
         )
 
     @classmethod
@@ -49,14 +57,29 @@ class GeminiMultimodalService:
         cls: type['GeminiMultimodalService'],
         contents: Any,
     ) -> str:
-        try:
+        response = None
+        for attempt in range(1, 4):
             client = cls._client()
-            response = client.models.generate_content(
-                model=config.gemini.model,
-                contents=cls._to_user_content(contents),
-            )
-        except Exception as error:
-            cls._raise_provider_error(error)
+            try:
+                response = client.models.generate_content(
+                    model=config.gemini.model,
+                    contents=cls._to_user_content(contents),
+                )
+                break
+            except Exception as error:
+                if not cls._is_retryable_network_error(error) or attempt == 3:
+                    cls._raise_provider_error(error)
+                logger.warning(
+                    'Ошибка соединения с Gemini, повторная попытка %s из 3: %s',
+                    attempt + 1,
+                    error,
+                )
+                time.sleep(attempt * 2)
+            finally:
+                client.close()
+
+        if response is None:
+            raise RuntimeError('Gemini не вернул ответ после повторных попыток')
 
         response_text = getattr(response, 'text', None)
         if response_text:
@@ -74,6 +97,17 @@ class GeminiMultimodalService:
         if not result:
             raise ValueError('Gemini не вернул текстовый результат')
         return result
+
+    @classmethod
+    def _is_retryable_network_error(
+        cls: type['GeminiMultimodalService'],
+        error: Exception,
+    ) -> bool:
+        error_text = str(error).casefold()
+        return any(
+            marker in error_text
+            for marker in ('readerror', 'connection reset', 'connection error', 'timed out', 'timeout')
+        )
 
     @classmethod
     def _to_user_content(
