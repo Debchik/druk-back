@@ -10,6 +10,7 @@ from app.dependencies import current_user
 from app.dto.boyfriend import BoyfriendResponse
 from app.dto.chat import ChatCreateRequest, ChatResponse
 from app.dto.message import MessageRequest, MessageResponse, MessageTaskResponse
+from app.dto.feedback import FeedbackRequest, FeedbackResponse
 from app.logging import logger
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
@@ -19,6 +20,7 @@ from app.services.boyfriend_service import BoyfriendService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
 from app.services.rate_limit_service import RateLimitService
+from app.services.feedback_service import FeedbackService
 
 router = APIRouter(tags=['chat'])
 
@@ -116,3 +118,31 @@ async def cancel_message(
         raise HTTPException(status_code=404, detail=str(error))
     logger.info('chat_message_cancel_completed message_id=%s task_id=%s status=%s', message_id, task_id, message.status)
     return MessageTaskResponse(message=message, task_id=task_id, task_status=message.status)
+
+
+@router.post('/chats/{chat_id}/messages/{message_id}/feedback', response_model=FeedbackResponse)
+async def save_feedback(
+    chat_id: UUID,
+    message_id: UUID,
+    payload: FeedbackRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FeedbackResponse:
+    logger.info('Сохранение оценки ответа начато user_id=%s message_id=%s', user.id, message_id)
+    try:
+        feedback = await FeedbackService.save(
+            db,
+            user.id,
+            chat_id,
+            message_id,
+            payload.reaction,
+            payload.reason,
+        )
+    except LookupError as error:
+        logger.warning('Оценка ответа отклонена message_id=%s причина=%s', message_id, error)
+        raise HTTPException(status_code=404, detail=str(error))
+    except ValueError as error:
+        logger.warning('Оценка ответа некорректна message_id=%s причина=%s', message_id, error)
+        raise HTTPException(status_code=400, detail=str(error))
+    logger.info('Сохранение оценки ответа завершено message_id=%s feedback_id=%s', message_id, feedback.id)
+    return feedback

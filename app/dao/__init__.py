@@ -8,5 +8,6 @@ from app.dao.user_dao import UserDao
 from app.dao.telegram_link_token_dao import TelegramLinkTokenDao
 from app.dao.user_profile_dao import UserProfileDao
 from app.dao.proactive_message_dao import ProactiveMessageDao
+from app.dao.feedback_dao import FeedbackDao
 
-__all__ = ['BoyfriendDao', 'CharacterVersionDao', 'ChatDao', 'MediaAssetDao', 'MessageDao', 'OnboardingDao', 'ProactiveMessageDao', 'TelegramLinkTokenDao', 'UserDao', 'UserProfileDao']
+__all__ = ['BoyfriendDao', 'CharacterVersionDao', 'ChatDao', 'FeedbackDao', 'MediaAssetDao', 'MessageDao', 'OnboardingDao', 'ProactiveMessageDao', 'TelegramLinkTokenDao', 'UserDao', 'UserProfileDao']
