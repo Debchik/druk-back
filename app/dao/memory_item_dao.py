@@ -10,6 +10,36 @@ from app.models.memory_item import MemoryItem
 
 class MemoryItemDao:
     @classmethod
+    async def get_for_user(
+        cls: type['MemoryItemDao'],
+        db: AsyncSession,
+        user_id: UUID,
+        item_id: UUID,
+    ) -> Optional[MemoryItem]:
+        return await db.scalar(
+            sa.select(MemoryItem).where(
+                MemoryItem.id == item_id,
+                MemoryItem.user_id == user_id,
+            )
+        )
+
+    @classmethod
+    async def list_user_visible(
+        cls: type['MemoryItemDao'],
+        db: AsyncSession,
+        user_id: UUID,
+    ) -> List[MemoryItem]:
+        result = await db.scalars(
+            sa.select(MemoryItem)
+            .where(
+                MemoryItem.user_id == user_id,
+                MemoryItem.status == 'active',
+            )
+            .order_by(MemoryItem.updated_at.desc(), MemoryItem.created_at.desc())
+        )
+        return list(result)
+
+    @classmethod
     async def list_active(
         cls: type['MemoryItemDao'],
         db: AsyncSession,
@@ -111,6 +141,8 @@ class MemoryItemDao:
         item.source_message_id = source_message_id
         item.metadata_json = metadata_json
         item.last_seen_at = now
+        item.deleted_at = None
+        item.deletion_source = None
         await db.flush()
         return item
 
@@ -142,7 +174,10 @@ class MemoryItemDao:
         cls: type['MemoryItemDao'],
         db: AsyncSession,
         item: MemoryItem,
+        source: str = 'dialogue',
     ) -> MemoryItem:
-        item.status = 'deleted'
+        item.status = 'deleted_by_user' if source == 'user_api' else 'deleted'
+        item.deleted_at = datetime.utcnow()
+        item.deletion_source = source
         await db.flush()
         return item

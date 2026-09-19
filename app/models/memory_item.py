@@ -36,6 +36,8 @@ class MemoryItem(Base):
         nullable=True,
         index=True,
     )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime, nullable=True)
+    deletion_source: Mapped[Optional[str]] = mapped_column(sa.String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow, onupdate=Base.utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)

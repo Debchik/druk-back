@@ -15,6 +15,10 @@ class SafetyService:
         r'\bубить\s+себя\b',
         r'\bsuicid(?:e|al)?\b',
     )
+    _sexual_patterns = (
+        r'\bпорн\w*\b',
+        r'\bexplicit sexual\b',
+    )
 
     @classmethod
     def local_check(cls: type['SafetyService'], text: str) -> SafetyResult:
@@ -25,6 +29,13 @@ class SafetyService:
                 categories=['self_harm'],
                 confidence=0.99,
                 rationale='high_precision_local_pattern',
+            )
+        if any(re.search(pattern, lowered) for pattern in cls._sexual_patterns):
+            return SafetyResult(
+                decision='soft_block',
+                categories=['sexual'],
+                confidence=0.90,
+                rationale='local_explicit_content_marker',
             )
         return SafetyResult(
             decision='allow',

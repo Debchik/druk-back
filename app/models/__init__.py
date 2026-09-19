@@ -5,6 +5,7 @@ from app.models.feedback import Feedback
 from app.models.media_asset import MediaAsset
 from app.models.memory_episode import MemoryEpisode
 from app.models.memory_event import MemoryEvent
+from app.models.memory_fact_deletion_event import MemoryFactDeletionEvent
 from app.models.memory_item import MemoryItem
 from app.models.memory_suppression import MemorySuppression
 from app.models.message import Message
@@ -23,6 +24,7 @@ __all__ = [
     'MediaAsset',
     'MemoryEpisode',
     'MemoryEvent',
+    'MemoryFactDeletionEvent',
     'MemoryItem',
     'MemorySuppression',
     'Message',

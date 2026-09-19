@@ -15,6 +15,23 @@ def test_additional_preference_is_not_replacement_by_default() -> None:
         reason='explicit preference',
     )
     assert fact.replace_existing is False
+    assert fact.supersedes_predicates == []
+
+
+def test_cross_predicate_correction_can_be_declared_explicitly() -> None:
+    fact = FactCandidate(
+        kind='preference',
+        subject='user',
+        predicate='likes_drink',
+        value='капучино',
+        confidence=0.99,
+        stability='stable',
+        sensitivity='normal',
+        store=True,
+        supersedes_predicates=['dislikes_drink'],
+        reason='user explicitly changed the preference',
+    )
+    assert fact.supersedes_predicates == ['dislikes_drink']
 
 
 def test_same_turn_forget_wins_over_fact_extraction() -> None:

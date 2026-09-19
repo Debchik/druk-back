@@ -1,6 +1,8 @@
+from datetime import datetime
 from typing import List, Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 FactKind = Literal[
@@ -26,6 +28,7 @@ class FactCandidate(BaseModel):
     sensitivity: Literal['normal', 'private', 'sensitive']
     store: bool
     replace_existing: bool = False
+    supersedes_predicates: List[str] = Field(default_factory=list)
     reason: str = ''
 
 
@@ -101,3 +104,16 @@ class OutputAudit(BaseModel):
     too_creepy: bool = False
     rewrite_needed: bool = False
     rationale: str = ''
+
+
+class MemoryFactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    kind: str
+    subject: str
+    predicate: str
+    value: str
+    created_at: datetime
+    updated_at: datetime
+    last_seen_at: datetime

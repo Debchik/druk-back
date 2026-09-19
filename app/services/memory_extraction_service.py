@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.memory_episode_dao import MemoryEpisodeDao
 from app.dao.memory_event_dao import MemoryEventDao
+from app.dao.memory_fact_deletion_event_dao import MemoryFactDeletionEventDao
 from app.dao.memory_item_dao import MemoryItemDao
 from app.dao.memory_suppression_dao import MemorySuppressionDao
 from app.dao.message_dao import MessageDao
@@ -39,7 +40,8 @@ class MemoryExtractionService:
 - Если пользователь говорит «не запоминай это / не сохраняй это», set do_not_store_turn=true.
 - sensitive health/sexual/political/religious information помечай sensitivity="sensitive". Сервис решит, хранить ли его.
 - Факты делай атомарными.
-- replace_existing=true ТОЛЬКО когда пользователь явно исправляет/меняет прежнее значение: «раньше X, теперь Y», «не X, а Y». Новый дополнительный интерес или новый человек не заменяет старый факт.
+- replace_existing=true ТОЛЬКО когда пользователь явно исправляет/меняет прежнее значение в том же predicate: «раньше X, теперь Y», «не X, а Y». Новый дополнительный интерес или новый человек не заменяет старый факт.
+- supersedes_predicates перечисляет старые predicate, которые новое высказывание ЯВНО делает неактуальными. Например, «раньше терпеть не мог кофе, теперь люблю капучино» может дать новый likes_drink и supersedes_predicates=["dislikes_drink"]. Не используй это поле для просто дополнительных предпочтений.
 - entities содержит только явно названные связанные сущности/людей.
 
 УДАЛЕНИЕ
@@ -73,6 +75,7 @@ class MemoryExtractionService:
     "sensitivity": "normal|private|sensitive",
     "store": true,
     "replace_existing": false,
+    "supersedes_predicates": [],
     "reason": ""
   }],
   "people": [{
@@ -279,6 +282,13 @@ class MemoryExtractionService:
                 if old.value_hash != value_hash:
                     await MemoryItemDao.mark_superseded(db, old)
 
+        for predicate in fact.supersedes_predicates:
+            old_key = MemoryService.canonical_key(fact.kind, fact.subject, predicate)
+            if old_key == canonical_key:
+                continue
+            for old in await MemoryItemDao.list_active_for_key(db, user_id, old_key):
+                await MemoryItemDao.mark_superseded(db, old)
+
         if existing is not None:
             if existing.status == 'active':
                 await MemoryItemDao.refresh(db, existing, fact.confidence, now)
@@ -400,7 +410,8 @@ class MemoryExtractionService:
                 for item in items:
                     if MemoryService.deletion_match_score(deletion, item) < 0.75:
                         continue
-                    await MemoryItemDao.mark_deleted(db, item)
+                    await MemoryFactDeletionEventDao.create(db, user_id, item.id, 'dialogue')
+                    await MemoryItemDao.mark_deleted(db, item, source='dialogue')
                     if item.source_message_id is not None:
                         source = await MessageDao.get_by_id(db, item.source_message_id)
                         if source is not None:
