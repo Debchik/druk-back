@@ -27,8 +27,6 @@ class FactCandidate(BaseModel):
     stability: Literal['ephemeral', 'medium', 'stable']
     sensitivity: Literal['normal', 'private', 'sensitive']
     store: bool
-    replace_existing: bool = False
-    supersedes_predicates: List[str] = Field(default_factory=list)
     reason: str = ''
 
 
@@ -69,12 +67,31 @@ class EventCandidate(BaseModel):
 
 
 class MemoryAnalysis(BaseModel):
+    """Active memory-agent output.
+
+    Deliberately contains no destructive memory operations. The memory agent may
+    add/refresh facts, people and events, but cannot delete or supersede facts.
+    """
+
     facts: List[FactCandidate] = Field(default_factory=list)
     people: List[PersonCandidate] = Field(default_factory=list)
-    deletions: List[DeletionRequest] = Field(default_factory=list)
     events: List[EventCandidate] = Field(default_factory=list)
     do_not_store_turn: bool = False
     notes: List[str] = Field(default_factory=list)
+
+
+class AutomaticFactMutationCandidate(FactCandidate):
+    """RESERVED / DISABLED: scaffold for future automatic conflict resolution."""
+
+    replace_existing: bool = False
+    supersedes_predicates: List[str] = Field(default_factory=list)
+
+
+class AutomaticMemoryMutationPlan(BaseModel):
+    """RESERVED / DISABLED: not requested from the LLM and not applied in production."""
+
+    fact_mutations: List[AutomaticFactMutationCandidate] = Field(default_factory=list)
+    deletions: List[DeletionRequest] = Field(default_factory=list)
 
 
 class EpisodeSummary(BaseModel):

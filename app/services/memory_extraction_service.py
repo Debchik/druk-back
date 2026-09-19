@@ -28,8 +28,7 @@ class MemoryExtractionService:
 Твоя задача за ОДИН проход:
 1. выделить полезные долгосрочные факты;
 2. выделить людей и отношения пользователя с ними;
-3. распознать явные команды забыть/удалить память;
-4. выделить события, обещания, дедлайны и встречи для будущих follow-up.
+3. выделить события, обещания, дедлайны и встречи для будущих follow-up.
 
 ПРАВИЛА ПАМЯТИ
 - Сохраняй только явно сказанное пользователем.
@@ -40,16 +39,9 @@ class MemoryExtractionService:
 - Если пользователь говорит «не запоминай это / не сохраняй это», set do_not_store_turn=true.
 - sensitive health/sexual/political/religious information помечай sensitivity="sensitive". Сервис решит, хранить ли его.
 - Факты делай атомарными.
-- replace_existing=true ТОЛЬКО когда пользователь явно исправляет/меняет прежнее значение в том же predicate: «раньше X, теперь Y», «не X, а Y». Новый дополнительный интерес или новый человек не заменяет старый факт.
-- supersedes_predicates перечисляет старые predicate, которые новое высказывание ЯВНО делает неактуальными. Например, «раньше терпеть не мог кофе, теперь люблю капучино» может дать новый likes_drink и supersedes_predicates=["dislikes_drink"]. Не используй это поле для просто дополнительных предпочтений.
+- Не пытайся автоматически разрешать противоречия между старыми и новыми фактами. На текущем этапе старые факты не удаляются и не помечаются неактивными агентом.
+- Не интерпретируй команды «забудь/удали из памяти» как операции над хранилищем. Удаление фактов сейчас выполняется только явным пользовательским DELETE API.
 - entities содержит только явно названные связанные сущности/людей.
-
-УДАЛЕНИЕ
-- «Забудь X», «удали X из памяти», «не помни больше X» -> deletion request.
-- Всегда сохраняй target_text человеческим языком и, когда возможно, заполняй structured поля kind/subject/predicate/value.
-- «Забудь всё про Машу» -> scope="all_matching", person_name="Маша"; не выдумывай predicate.
-- «Удали встречу с Антоном» -> scope="event", event_title с кратким описанием.
-- deletion request сам не является фактом.
 
 ЛЮДИ
 - Не сливай людей только по одинаковому имени. Используй disambiguator, когда он есть: «Саша с работы», «Саша — сестра».
@@ -74,8 +66,6 @@ class MemoryExtractionService:
     "stability": "ephemeral|medium|stable",
     "sensitivity": "normal|private|sensitive",
     "store": true,
-    "replace_existing": false,
-    "supersedes_predicates": [],
     "reason": ""
   }],
   "people": [{
@@ -86,18 +76,6 @@ class MemoryExtractionService:
     "confidence": 0.0,
     "sensitivity": "normal|private|sensitive",
     "store": true
-  }],
-  "deletions": [{
-    "target_text": "",
-    "scope": "fact|person|episode|event|all_matching",
-    "kind": null,
-    "subject": null,
-    "predicate": null,
-    "value": null,
-    "person_name": null,
-    "event_title": null,
-    "confidence": 1.0,
-    "reason": ""
   }],
   "events": [{
     "action": "create|update|cancel",
@@ -178,7 +156,8 @@ class MemoryExtractionService:
         assistant_text = assistant.content if assistant is not None else ''
         analysis = await cls.analyze(profile.timezone, message.content, assistant_text)
 
-        # A forget request can be processed while the cheap model is running. Re-check before any write.
+        # A manual DELETE /memory/facts/{id} can happen while the cheap model is running.
+        # Re-check user-created suppressions before any write so an explicit UI deletion wins the race.
         suppressions = await MemorySuppressionDao.list_for_user(db, chat.user_id)
         if MemoryService.is_message_suppressed(message, suppressions):
             await MessageDao.set_memory_visibility(db, message, 'blocked')
@@ -186,8 +165,6 @@ class MemoryExtractionService:
             await db.commit()
             logger.info('memory_message_suppressed_after_analysis message_id=%s', message.id)
             return
-
-        await cls._apply_deletions(db, chat.user_id, analysis)
 
         if analysis.do_not_store_turn:
             await MessageDao.set_memory_visibility(db, message, 'short_term_only')
@@ -198,12 +175,8 @@ class MemoryExtractionService:
 
         now = cls._now_naive()
         for fact in analysis.facts:
-            if cls._fact_matches_same_turn_deletion(fact, analysis.deletions):
-                continue
             await cls._store_fact(db, chat.user_id, message, fact, now)
         for person in analysis.people:
-            if cls._person_matches_same_turn_deletion(person, analysis.deletions):
-                continue
             await cls._store_person(db, chat.user_id, message, person, now)
         await cls._apply_events(db, chat.user_id, chat.id, message, profile.timezone, analysis.events)
 
@@ -215,14 +188,17 @@ class MemoryExtractionService:
         message.memory_processed_at = now
         await db.commit()
         logger.info(
-            'memory_processing_completed message_id=%s facts=%s people=%s deletions=%s events=%s',
+            'memory_processing_completed message_id=%s facts=%s people=%s events=%s',
             message.id,
             len(analysis.facts),
             len(analysis.people),
-            len(analysis.deletions),
             len(analysis.events),
         )
 
+    # RESERVED / DISABLED.
+    # Automatic forgetting is intentionally not wired into analyze()/process_message().
+    # These matchers are kept as a scaffold for future experiments after we have evals
+    # proving that model-driven destructive writes are safe enough.
     @classmethod
     def _fact_matches_same_turn_deletion(
         cls: type['MemoryExtractionService'],
@@ -277,18 +253,9 @@ class MemoryExtractionService:
         existing = await MemoryItemDao.get_by_key_value(db, user_id, canonical_key, value_hash)
         metadata = {'entities': fact.entities, 'source_text': source_message.content[:500]}
 
-        if fact.replace_existing:
-            for old in await MemoryItemDao.list_active_for_key(db, user_id, canonical_key):
-                if old.value_hash != value_hash:
-                    await MemoryItemDao.mark_superseded(db, old)
-
-        for predicate in fact.supersedes_predicates:
-            old_key = MemoryService.canonical_key(fact.kind, fact.subject, predicate)
-            if old_key == canonical_key:
-                continue
-            for old in await MemoryItemDao.list_active_for_key(db, user_id, old_key):
-                await MemoryItemDao.mark_superseded(db, old)
-
+        # Important invariant for the current MVP: the LLM memory agent performs
+        # append/refresh writes only. It never deactivates an older fact because a
+        # newer statement looks contradictory. Destructive mutation is user-owned.
         if existing is not None:
             if existing.status == 'active':
                 await MemoryItemDao.refresh(db, existing, fact.confidence, now)
@@ -346,7 +313,6 @@ class MemoryExtractionService:
             stability='stable',
             sensitivity=person.sensitivity,
             store=True,
-            replace_existing=True,
             reason='person_entity',
         )
         canonical_key = MemoryService.canonical_key(fact.kind, fact.subject, fact.predicate)
@@ -359,9 +325,6 @@ class MemoryExtractionService:
             'notes': person.notes,
             'source_text': source_message.content[:500],
         }
-        for old in await MemoryItemDao.list_active_for_key(db, user_id, canonical_key):
-            if old.value_hash != value_hash:
-                await MemoryItemDao.mark_superseded(db, old)
         if existing is not None:
             await MemoryItemDao.reactivate(
                 db,
@@ -391,19 +354,25 @@ class MemoryExtractionService:
         )
 
     @classmethod
-    async def _apply_deletions(
+    async def _apply_automatic_deletions_disabled(
         cls: type['MemoryExtractionService'],
         db: AsyncSession,
         user_id: UUID,
-        analysis: MemoryAnalysis,
+        deletions: list[DeletionRequest],
     ) -> None:
-        if not analysis.deletions:
+        """RESERVED / DISABLED.
+
+        This code is intentionally not called from the memory worker. Keeping it
+        here makes the old prototype easy to revisit without spending prompt
+        tokens or allowing the LLM to perform destructive memory writes today.
+        """
+        if not deletions:
             return
         items = await MemoryItemDao.list_active(db, user_id)
         episodes = await MemoryEpisodeDao.list_active(db, user_id)
         events = await MemoryEventDao.list_active(db, user_id)
 
-        for deletion in analysis.deletions:
+        for deletion in deletions:
             await MemorySuppressionDao.create(db, user_id, deletion)
 
             if deletion.scope in {'fact', 'person', 'all_matching'}:
