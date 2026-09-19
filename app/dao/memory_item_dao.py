@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -177,7 +177,7 @@ class MemoryItemDao:
         source: str = 'dialogue',
     ) -> MemoryItem:
         item.status = 'deleted_by_user' if source == 'user_api' else 'deleted'
-        item.deleted_at = datetime.utcnow()
+        item.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         item.deletion_source = source
         await db.flush()
         return item
