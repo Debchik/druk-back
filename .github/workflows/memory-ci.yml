@@ -45,7 +45,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q app tests settings.py main.py
       - name: Validate docker compose
-        run: docker compose config --quiet
+        run: cp .env.example .env && docker compose config --quiet
       - name: Apply database migrations
         run: PYTHONPATH=. alembic upgrade head
       - name: Verify memory routes
