@@ -53,10 +53,9 @@ RATE_LIMIT_WINDOW_SECONDS=60
 
 ```bash
 docker compose up -d --build
-docker compose exec app alembic upgrade head
 ```
 
-Сообщение отправляется в Celery и сразу возвращает `202 Accepted`. Ответ
+Перед запуском API/worker/beat одноразовый сервис `migrate` выполняет `alembic upgrade head`. Сообщение отправляется в Celery и сразу возвращает `202 Accepted`. Ответ
 worker сохраняет в общую историю. Для повторяемого запроса передавайте
 `X-Idempotency-Key`. Для отложенного сообщения передавайте в JSON
 `scheduled_at` в будущем, например `2026-09-08T18:30:00+03:00`.
