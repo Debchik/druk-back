@@ -53,7 +53,7 @@ class GeminiMultimodalService:
             client = cls._client()
             response = client.models.generate_content(
                 model=config.gemini.model,
-                contents=contents,
+                contents=cls._to_user_content(contents),
             )
         except Exception as error:
             cls._raise_provider_error(error)
@@ -74,6 +74,19 @@ class GeminiMultimodalService:
         if not result:
             raise ValueError('Gemini не вернул текстовый результат')
         return result
+
+    @classmethod
+    def _to_user_content(
+        cls: type['GeminiMultimodalService'],
+        contents: list,
+    ) -> types.Content:
+        parts = []
+        for item in contents:
+            if isinstance(item, str):
+                parts.append(types.Part.from_text(text=item))
+            else:
+                parts.append(item)
+        return types.Content(role='user', parts=parts)
 
     @classmethod
     async def _generate_text(
