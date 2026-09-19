@@ -136,9 +136,9 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
     # via
     #   sber-disrupt-ai-boyfriend (pyproject.toml)
+    #   pydantic-settings
 python-multipart==0.0.20
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
-    #   pydantic-settings
 pyyaml==6.0.3
     # via langchain-core
 redis==6.4.0
