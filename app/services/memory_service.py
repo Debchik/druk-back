@@ -197,17 +197,24 @@ class MemoryService:
         now: datetime,
         limit: int,
     ) -> List[MemoryEvent]:
-        temporal_words = {'сегодня', 'завтра', 'вчера', 'скоро', 'встреча', 'дедлайн', 'событие', 'today', 'tomorrow'}
-        has_temporal_query = bool(set(cls.tokens(query)) & temporal_words)
+        temporal_lookup = bool(
+            re.search(
+                r'\b(что у меня|какие планы|что запланировано|расписани[ея]|календар[ья]|'
+                r'когда встреча|когда дедлайн|what do i have|what is planned|schedule|calendar)\b',
+                query.lower(),
+            )
+        )
         scored = []
         for event in events:
             text = f"{event.title} {' '.join(event.participants or [])} {event.kind}"
             lexical = cls.lexical_score(query, text)
             temporal = 0.0
-            if has_temporal_query and event.when_at is not None:
+            if temporal_lookup and event.when_at is not None:
                 event_time = event.when_at.replace(tzinfo=timezone.utc) if event.when_at.tzinfo is None else event.when_at
                 distance_days = abs((event_time - now).total_seconds()) / 86400
                 temporal = 0.2 / (1 + distance_days)
+            if lexical <= 0 and not temporal_lookup:
+                continue
             if lexical <= 0 and temporal <= 0:
                 continue
             scored.append((lexical + temporal, event))

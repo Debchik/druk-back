@@ -131,3 +131,52 @@ def test_event_similarity_matches_reschedule():
         status='active', source_fragment='', created_at=datetime(2026, 9, 19), updated_at=datetime(2026, 9, 19),
     )
     assert MemoryService.event_similarity(candidate, event) >= 0.45
+
+
+def test_unrelated_event_is_not_retrieved_just_because_query_mentions_today():
+    now = datetime(2026, 9, 19, 12, 0)
+    event = MemoryEvent(
+        id=uuid4(),
+        user_id=uuid4(),
+        chat_id=uuid4(),
+        title='Демонстрация Druk',
+        when_at=now + timedelta(hours=2),
+        participants=['Никита'],
+        kind='meeting',
+        confidence=0.99,
+        should_follow_up=True,
+        sensitivity='normal',
+        status='active',
+        source_fragment='',
+        created_at=now,
+        updated_at=now,
+    )
+    selected = MemoryService.select_events(
+        [event],
+        'Я сегодня просто хочу поговорить про фильм.',
+        now,
+        5,
+    )
+    assert selected == []
+
+
+def test_explicit_schedule_query_can_retrieve_nearby_event_without_title_overlap():
+    now = datetime(2026, 9, 19, 12, 0)
+    event = MemoryEvent(
+        id=uuid4(),
+        user_id=uuid4(),
+        chat_id=uuid4(),
+        title='Демонстрация Druk',
+        when_at=now + timedelta(hours=2),
+        participants=['Никита'],
+        kind='meeting',
+        confidence=0.99,
+        should_follow_up=True,
+        sensitivity='normal',
+        status='active',
+        source_fragment='',
+        created_at=now,
+        updated_at=now,
+    )
+    selected = MemoryService.select_events([event], 'Что у меня запланировано?', now, 5)
+    assert selected == [event]
