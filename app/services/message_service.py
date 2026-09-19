@@ -19,6 +19,7 @@ from app.services.memory_service import MemoryService
 from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 from app.services.reminder_service import ReminderService
+from app.services.companion_prompt_service import CompanionPromptService
 
 
 class MessageService:
@@ -182,6 +183,7 @@ class MessageService:
                 'Если базовый prompt противоречит им, всегда соблюдай критические настройки.\n\n'
                 + character.system_prompt
                 + GenderAndAddressingService.build_context(profile, character)
+                + CompanionPromptService.capability_policy()
             )
             if reminder is not None:
                 system_prompt += (

@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.services.gemini_service import GeminiAIService
 from app.services.gender_addressing_service import GenderAndAddressingService
+from app.services.companion_prompt_service import CompanionPromptService
 from app.services.redis_task_service import RedisTaskService
 from settings import config
 
@@ -182,6 +183,7 @@ class ProactiveMessageService:
                 'Критические настройки персонажа важнее общих инструкций.\n\n'
                 + character.system_prompt
                 + GenderAndAddressingService.build_context(profile, character)
+                + CompanionPromptService.capability_policy()
             )
             if proactive_message.reason == 'reminder':
                 original_message = None
