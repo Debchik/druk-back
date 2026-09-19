@@ -204,6 +204,7 @@ class MemoryService:
                 query.lower(),
             )
         )
+        reference_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
         scored = []
         for event in events:
             text = f"{event.title} {' '.join(event.participants or [])} {event.kind}"
@@ -211,7 +212,7 @@ class MemoryService:
             temporal = 0.0
             if temporal_lookup and event.when_at is not None:
                 event_time = event.when_at.replace(tzinfo=timezone.utc) if event.when_at.tzinfo is None else event.when_at
-                distance_days = abs((event_time - now).total_seconds()) / 86400
+                distance_days = abs((event_time - reference_now).total_seconds()) / 86400
                 temporal = 0.2 / (1 + distance_days)
             if lexical <= 0 and not temporal_lookup:
                 continue
