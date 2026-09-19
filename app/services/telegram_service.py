@@ -59,6 +59,9 @@ class TelegramService:
         if not config.telegram.bot_token:
             logger.warning('telegram_send_skipped reason=bot_token_missing')
             return
+        if not text or not text.strip():
+            logger.error('Попытка отправить в Telegram пустое сообщение chat_suffix=%s', str(chat_id)[-4:])
+            raise ValueError('Нельзя отправить пустое сообщение в Telegram')
         logger.info('telegram_send_started chat_suffix=%s text_chars=%s', str(chat_id)[-4:], len(text))
         try:
             text_parts = cls._split_message(text)

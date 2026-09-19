@@ -6,6 +6,7 @@ from google import genai
 from google.genai import types
 
 from app.logging import logger
+from app.services.gemini_rate_limiter import GeminiRateLimiter
 from settings import config
 
 
@@ -61,6 +62,7 @@ class GeminiMultimodalService:
         for attempt in range(1, 4):
             client = cls._client()
             try:
+                GeminiRateLimiter.acquire()
                 response = client.models.generate_content(
                     model=config.gemini.model,
                     contents=cls._to_user_content(contents),

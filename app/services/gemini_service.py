@@ -4,6 +4,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from app.clients.http_client import HttpClientFactory
 from app.logging import logger
+from app.services.gemini_rate_limiter import GeminiRateLimiter
 from settings import config
 
 
@@ -50,6 +51,7 @@ class GeminiAIService:
     async def generate_reply(cls: type['GeminiAIService'], system_prompt: str, messages: List[Dict[str, str]]) -> str:
         logger.info('gemini_request_started model=%s context_messages=%s', config.gemini.model, len(messages))
         try:
+            await GeminiRateLimiter.acquire_async()
             chat_model = cls.get_chat_model()
             model_messages = [('system', system_prompt)] + [(item['role'], item['content']) for item in messages]
             response = await chat_model.ainvoke(model_messages)
@@ -57,6 +59,9 @@ class GeminiAIService:
                 reply = response.content
             else:
                 reply = ' '.join(str(part) for part in response.content)
+            reply = reply.strip()
+            if not reply:
+                raise ValueError('Gemini вернул пустой текстовый ответ')
             logger.info('gemini_request_completed model=%s response_chars=%s', config.gemini.model, len(reply))
             return reply
         except Exception:

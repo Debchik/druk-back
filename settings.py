@@ -23,6 +23,7 @@ class AuthConfig(BaseSettings):
 class GeminiConfig(BaseSettings):
     api_key: str = ''
     model: str = 'gemini-2.5-flash'
+    rpm_limit: int = 15
     transcription_model: Optional[str] = None
     tts_model: str = 'gemini-3.1-flash-tts-preview'
     tts_voice: str = 'Kore'

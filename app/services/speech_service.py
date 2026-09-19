@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types
 
 from app.logging import logger
+from app.services.gemini_rate_limiter import GeminiRateLimiter
 from settings import config
 
 
@@ -62,6 +63,7 @@ class GeminiSpeechService:
             ),
         )
         try:
+            GeminiRateLimiter.acquire()
             response = client.models.generate_content(
                 model=config.gemini.tts_model,
                 contents=text,
