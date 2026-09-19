@@ -23,4 +23,4 @@ jobs:
       - name: Compile
         run: python -m compileall -q app tests settings.py main.py
       - name: Memory tests
-        run: pytest -q tests/test_memory_logic.py tests/test_memory_extraction_policy.py tests/test_safety_service.py tests/test_memory_fact_service.py
+        run: PYTHONPATH=. pytest -q tests/test_memory_logic.py tests/test_memory_extraction_policy.py tests/test_safety_service.py tests/test_memory_fact_service.py
