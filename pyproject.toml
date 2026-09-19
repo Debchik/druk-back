@@ -24,3 +24,8 @@ dependencies = [
     "uvicorn>=0.52.4",
     "google>=3.0.0",
 ]
+
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["migrations*", "tests*", "tmp_stt_test*"]
