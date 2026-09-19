@@ -10,6 +10,27 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASS: postgres
+      TELEGRAM_MODE: webhook
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,5 +43,15 @@ jobs:
           python -m pip install -r requirements.txt pytest
       - name: Compile
         run: python -m compileall -q app tests settings.py main.py
+      - name: Apply database migrations
+        run: PYTHONPATH=. alembic upgrade head
+      - name: Verify memory routes
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from main import app
+          paths = {route.path for route in app.routes}
+          assert '/api/v1/memory/facts' in paths
+          assert '/api/v1/memory/facts/{fact_id}' in paths
+          PY
       - name: Memory tests
         run: PYTHONPATH=. pytest -q tests/test_memory_logic.py tests/test_memory_extraction_policy.py tests/test_safety_service.py tests/test_memory_fact_service.py
