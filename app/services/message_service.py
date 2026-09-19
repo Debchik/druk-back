@@ -24,6 +24,19 @@ from app.services.companion_prompt_service import CompanionPromptService
 
 class MessageService:
     @classmethod
+    async def attach_external_id(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        message_id: UUID,
+        external_id: str,
+    ) -> None:
+        message = await MessageDao.get_by_id(db, message_id)
+        if message is None:
+            raise LookupError('Message not found')
+        await MessageDao.set_external_id(db, message, external_id)
+        await db.commit()
+
+    @classmethod
     async def enqueue_text(
         cls: type['MessageService'],
         db: AsyncSession,

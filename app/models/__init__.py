@@ -9,5 +9,6 @@ from app.models.user_profile import UserProfile
 from app.models.onboarding_state import OnboardingState
 from app.models.proactive_message import ProactiveMessage
 from app.models.feedback import Feedback
+from app.models.reaction_event import ReactionEvent
 
-__all__ = ['Boyfriend', 'CharacterVersion', 'Chat', 'Feedback', 'MediaAsset', 'Message', 'OnboardingState', 'ProactiveMessage', 'TelegramLinkToken', 'User', 'UserProfile']
+__all__ = ['Boyfriend', 'CharacterVersion', 'Chat', 'Feedback', 'MediaAsset', 'Message', 'OnboardingState', 'ProactiveMessage', 'ReactionEvent', 'TelegramLinkToken', 'User', 'UserProfile']

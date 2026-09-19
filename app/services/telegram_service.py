@@ -55,26 +55,28 @@ class TelegramService:
         return await ChatDao.commit(db, chat)
 
     @classmethod
-    async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+    async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Optional[int]:
         if not config.telegram.bot_token:
             logger.warning('telegram_send_skipped reason=bot_token_missing')
-            return
+            return None
         if not text or not text.strip():
             logger.error('Попытка отправить в Telegram пустое сообщение chat_suffix=%s', str(chat_id)[-4:])
             raise ValueError('Нельзя отправить пустое сообщение в Telegram')
         logger.info('telegram_send_started chat_suffix=%s text_chars=%s', str(chat_id)[-4:], len(text))
         try:
             text_parts = cls._split_message(text)
+            telegram_message_id = None
             for index, text_part in enumerate(text_parts):
                 current_markup = reply_markup if index == len(text_parts) - 1 else None
-                await asyncio.to_thread(cls._send_message, chat_id, text_part, current_markup)
+                telegram_message_id = await asyncio.to_thread(cls._send_message, chat_id, text_part, current_markup)
         except Exception:
             logger.exception('telegram_send_failed chat_suffix=%s', str(chat_id)[-4:])
             raise
         logger.info('telegram_send_completed chat_suffix=%s', str(chat_id)[-4:])
+        return telegram_message_id
 
     @classmethod
-    def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+    def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> int:
         payload: Dict[str, Any] = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup
@@ -93,6 +95,41 @@ class TelegramService:
                 response.text[:1000],
             )
         response.raise_for_status()
+        response_data = response.json()
+        return int(response_data['result']['message_id'])
+
+    @classmethod
+    async def set_message_reaction(
+        cls: type['TelegramService'],
+        chat_id: int,
+        message_id: int,
+        emoji: str,
+    ) -> None:
+        if not config.telegram.bot_token:
+            logger.warning('telegram_set_reaction_skipped reason=bot_token_missing')
+            return
+        await asyncio.to_thread(cls._set_message_reaction, chat_id, message_id, emoji)
+
+    @classmethod
+    def _set_message_reaction(
+        cls: type['TelegramService'],
+        chat_id: int,
+        message_id: int,
+        emoji: str,
+    ) -> None:
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/setMessageReaction',
+            json={
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'reaction': [{'type': 'emoji', 'emoji': emoji}],
+            },
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.error('Ошибка реакции Telegram status=%s ответ=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
 
     @classmethod
     def _split_message(cls: type['TelegramService'], text: str) -> List[str]:
@@ -110,8 +147,8 @@ class TelegramService:
         text: str,
         telegram_connected: bool,
         send_audio: bool = False,
-    ) -> None:
-        await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
+    ) -> Optional[int]:
+        telegram_message_id = await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
         if send_audio:
             from app.tasks.speech_task import process_speech_task
 
@@ -124,6 +161,7 @@ class TelegramService:
                 str(chat_id)[-4:],
                 assistant_message_id,
             )
+        return telegram_message_id
 
     @classmethod
     async def send_voice(
@@ -192,6 +230,32 @@ class TelegramService:
     @classmethod
     async def process_update(cls: type['TelegramService'], db: AsyncSession, update: Dict[str, Any]) -> None:
         logger.info('telegram_update_received update_id=%s', update.get('update_id'))
+        reaction_update = update.get('message_reaction')
+        if reaction_update is not None:
+            reaction_chat_id = reaction_update.get('chat', {}).get('id')
+            if reaction_chat_id is None:
+                return
+            reaction_user = reaction_update.get('user', {})
+            reaction_user_id = reaction_user.get('id')
+            if reaction_user_id is None:
+                logger.info('Реакция Telegram пропущена: отсутствует пользователь')
+                return
+            reaction_user_model = await UserDao.get_by_telegram_id(db, int(reaction_user_id))
+            reaction_chat = None
+            if reaction_user_model is not None:
+                reaction_chat = await ChatDao.get_for_platform(db, reaction_user_model.id, 'telegram')
+            if reaction_user_model is None or reaction_chat is None:
+                logger.info('Реакция Telegram пропущена: пользователь или чат не найдены')
+                return
+            from app.services.reaction_service import ReactionService
+
+            await ReactionService.process_telegram_update(
+                db,
+                reaction_user_model.id,
+                reaction_chat,
+                update,
+            )
+            return
         message = update.get('message') or update.get('edited_message')
         if not message or not message.get('chat', {}).get('id'):
             logger.debug('telegram_update_ignored reason=unsupported_payload')
@@ -453,7 +517,7 @@ class TelegramService:
             params={
                 'offset': offset,
                 'timeout': config.telegram.polling_timeout,
-                'allowed_updates': json.dumps(['message', 'edited_message']),
+                'allowed_updates': json.dumps(['message', 'edited_message', 'message_reaction']),
             },
             proxies=HttpClientFactory.get_requests_proxies('telegram'),
             timeout=config.telegram.polling_timeout + 10,

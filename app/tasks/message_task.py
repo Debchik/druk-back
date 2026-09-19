@@ -32,7 +32,7 @@ class ProcessMessageTask(Task):
             if message.platform == 'telegram' and assistant is not None and telegram_id is not None:
                 from app.services.telegram_service import TelegramService
 
-                asyncio.run(
+                telegram_message_id = asyncio.run(
                     TelegramService.send_assistant_response(
                         telegram_id,
                         assistant.id,
@@ -41,6 +41,42 @@ class ProcessMessageTask(Task):
                         message.message_type == 'audio_request',
                     )
                 )
+                if telegram_message_id is not None:
+                    try:
+                        async def save_telegram_message_id() -> None:
+                            async with async_session() as session:
+                                await MessageService.attach_external_id(
+                                    session,
+                                    assistant.id,
+                                    f'{telegram_id}:{telegram_message_id}',
+                                )
+
+                        asyncio.run(save_telegram_message_id())
+                    except Exception:
+                        logger.exception('Не удалось сохранить Telegram message_id ответа message_id=%s', assistant.id)
+                if message.role == 'user':
+                    try:
+                        async def create_character_reaction() -> None:
+                            from app.dao.message_dao import MessageDao
+                            from app.dao.user_profile_dao import UserProfileDao
+                            from app.services.reaction_service import ReactionService
+
+                            async with async_session() as session:
+                                message_data = await MessageDao.get_with_chat_boyfriend(session, message.id)
+                                if message_data is not None:
+                                    _, chat, _ = message_data
+                                    profile = await UserProfileDao.ensure(session, chat.user_id)
+                                    await ReactionService.react_to_user_message(
+                                        session,
+                                        message,
+                                        chat,
+                                        profile,
+                                        telegram_id,
+                                    )
+
+                        asyncio.run(create_character_reaction())
+                    except Exception:
+                        logger.exception('Не удалось поставить реакцию персонажа message_id=%s', message.id)
             RedisTaskService.save_state(message_id, task_id, 'completed')
             logger.info('celery_message_task_completed message_id=%s task_id=%s', message_id, task_id)
             return {

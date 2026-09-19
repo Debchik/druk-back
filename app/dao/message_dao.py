@@ -86,6 +86,17 @@ class MessageDao:
         return message
 
     @classmethod
+    async def set_external_id(
+        cls: type['MessageDao'],
+        db: AsyncSession,
+        message: Message,
+        external_id: str,
+    ) -> Message:
+        message.external_id = external_id
+        await db.flush()
+        return message
+
+    @classmethod
     async def commit_pair(cls: type['MessageDao'], db: AsyncSession, first: Message, second: Message) -> tuple[Message, Message]:
         first.status = 'completed'
         second.status = 'completed'
