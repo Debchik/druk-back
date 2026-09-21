@@ -26,8 +26,8 @@ class ApplicationLifecycle:
         polling_task = None
         stop_event = asyncio.Event()
         try:
-            async with async_engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
+            async with async_engine.begin() as async_session:
+                main_app.state.db = async_session
             logger.info('database_schema_ready')
             main_app.state.db = self.session_factory
             async with self.session_factory() as session:
