@@ -20,6 +20,7 @@ from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 from app.services.reminder_service import ReminderService
 from app.services.companion_prompt_service import CompanionPromptService
+from app.services.feedback_service import FeedbackService
 
 
 class MessageService:
@@ -198,6 +199,7 @@ class MessageService:
                 + GenderAndAddressingService.build_context(profile, character)
                 + CompanionPromptService.capability_policy()
             )
+            system_prompt += await FeedbackService.build_context(db, chat.user_id, chat.id)
             if reminder is not None:
                 system_prompt += (
                     '\n\nСистемное событие: напоминание успешно создано и поставлено в очередь. '

@@ -35,6 +35,25 @@ class MessageDao:
         return list(result)
 
     @classmethod
+    async def list_recent_assistant_for_chat(
+        cls: type['MessageDao'],
+        db: AsyncSession,
+        chat_id: UUID,
+        limit: int = 5,
+    ) -> List[Message]:
+        result = await db.scalars(
+            sa.select(Message)
+            .where(
+                Message.chat_id == chat_id,
+                Message.role == 'assistant',
+                Message.status == 'completed',
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return list(result)
+
+    @classmethod
     async def get_by_external_id(cls: type['MessageDao'], db: AsyncSession, platform: str, external_id: str) -> Optional[Message]:
         return await db.scalar(sa.select(Message).where(Message.platform == platform, Message.external_id == external_id))
 

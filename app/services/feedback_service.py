@@ -54,3 +54,24 @@ class FeedbackService:
         user_id: UUID,
     ) -> Dict[str, int]:
         return await FeedbackDao.aggregate_for_user(db, user_id)
+
+    @classmethod
+    async def build_context(
+        cls: type['FeedbackService'],
+        db: AsyncSession,
+        user_id: UUID,
+        chat_id: UUID,
+    ) -> str:
+        feedback_items = await FeedbackDao.list_for_chat(db, user_id, chat_id)
+        if not feedback_items:
+            return ''
+        rows = [
+            f'Оценка предыдущего ответа: reaction={feedback.reaction}, reason={feedback.reason or "не указана"}. '
+            f'Текст ответа начинался так: {message.content[:120]}'
+            for feedback, message in reversed(feedback_items)
+        ]
+        return (
+            '\n\nСигналы предпочтений пользователя по предыдущим ответам. '
+            'Учитывай их как мягкую настройку стиля и качества, но не упоминай технически:\n'
+            + '\n'.join(rows)
+        )
