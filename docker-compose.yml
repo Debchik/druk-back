@@ -2,14 +2,19 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+      POSTGRES_DB: ${DB_NAME:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - database_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7-alpine
@@ -18,18 +23,39 @@ services:
     networks:
       - database_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - database_network
 
   app:
     build:
+      context: .
       dockerfile: Dockerfile
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    command: ["/app/startup.sh"]
     volumes:
-      - .:/app
+      - media_storage:/app/storage
+      - app_logs:/app/logs
     env_file: .env
     restart: on-failure
     depends_on:
-      - db
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     networks:
       - database_network
     ports:
@@ -39,27 +65,33 @@ services:
 
   worker:
     build:
+      context: .
       dockerfile: Dockerfile
     command: celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=prefork -Q messages,audio,image,video,tts,proactive
     volumes:
-      - .:/app
+      - media_storage:/app/storage
+      - app_logs:/app/logs
     env_file: .env
     depends_on:
-      - db
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: on-failure
     networks:
       - database_network
 
   beat:
     build:
+      context: .
       dockerfile: Dockerfile
     command: celery -A app.celery_app:celery_app beat --loglevel=INFO
-    volumes:
-      - .:/app
     env_file: .env
     depends_on:
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: on-failure
     networks:
       - database_network
@@ -68,5 +100,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  media_storage:
+  app_logs:
 networks:
   database_network:
