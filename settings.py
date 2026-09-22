@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
-    debug: bool = True
+    debug: bool = False
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
