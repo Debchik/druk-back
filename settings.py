@@ -62,6 +62,7 @@ class CeleryConfig(BaseSettings):
     retry_backoff_seconds: int = 5
     retry_backoff_max_seconds: int = 300
     task_time_limit_seconds: int = 180
+    broker_visibility_timeout_seconds: int = 900
     model_config = SettingsConfigDict(env_prefix='CELERY_', env_file='.env', extra='ignore')
 
 

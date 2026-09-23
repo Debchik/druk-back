@@ -66,6 +66,14 @@ class MessageDao:
         return await db.scalar(sa.select(Message).where(Message.reply_to_message_id == message_id, Message.role == 'assistant'))
 
     @classmethod
+    async def is_telegram_reply_delivered(cls: type['MessageDao'], db: AsyncSession, message_id: UUID) -> bool:
+        message = await cls.get_by_id(db, message_id)
+        if message is None or message.platform != 'telegram':
+            return False
+        reply = await cls.get_reply(db, message_id)
+        return reply is not None and reply.external_id is not None
+
+    @classmethod
     async def count_recent_user_messages(
         cls: type['MessageDao'],
         db: AsyncSession,

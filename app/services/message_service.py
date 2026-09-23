@@ -25,6 +25,14 @@ from app.services.feedback_service import FeedbackService
 
 class MessageService:
     @classmethod
+    async def is_telegram_reply_delivered(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        message_id: UUID,
+    ) -> bool:
+        return await MessageDao.is_telegram_reply_delivered(db, message_id)
+
+    @classmethod
     async def attach_external_id(
         cls: type['MessageService'],
         db: AsyncSession,

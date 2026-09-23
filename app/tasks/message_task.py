@@ -21,6 +21,14 @@ class ProcessMessageTask(Task):
 
     def run(self: 'ProcessMessageTask', message_id: str) -> Dict[str, Any]:
         logger.info('celery_message_task_started message_id=%s task_id=%s retry=%s', message_id, self.request.id, self.request.retries)
+        if asyncio.run(self._is_telegram_reply_delivered(message_id)):
+            RedisTaskService.save_state(message_id, self.request.id or '', 'completed')
+            logger.warning(
+                'celery_message_task_duplicate_skipped message_id=%s task_id=%s причина=ответ_уже_доставлен',
+                message_id,
+                self.request.id,
+            )
+            return {'message_id': message_id, 'status': 'duplicate_skipped'}
         state = RedisTaskService.get_state(message_id)
         if state is not None and state.get('status') == 'cancelled':
             logger.info('celery_message_task_cancelled_before_start message_id=%s task_id=%s', message_id, self.request.id)
@@ -120,6 +128,13 @@ class ProcessMessageTask(Task):
     ) -> Any:
         async with async_session() as session:
             return await MessageService.process_message(session, UUID(message_id))
+
+    async def _is_telegram_reply_delivered(
+        self: 'ProcessMessageTask',
+        message_id: str,
+    ) -> bool:
+        async with async_session() as session:
+            return await MessageService.is_telegram_reply_delivered(session, UUID(message_id))
 
     async def _process_message_with_typing(
         self: 'ProcessMessageTask',
