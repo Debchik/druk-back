@@ -54,6 +54,8 @@ email-validator==2.3.0
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
 fastapi==0.115.14
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
+cairosvg==2.8.2
+    # via sber-disrupt-ai-boyfriend (pyproject.toml)
 google-genai==2.23.0
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
 greenlet==3.5.5
@@ -96,6 +98,8 @@ langchain-openai==1.6.0
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
 langchain-protocol==0.0.19
     # via langchain-core
+lottie==0.7.1
+    # via sber-disrupt-ai-boyfriend (pyproject.toml)
 langsmith==0.12.2
     # via langchain-core
 mako==1.4.1

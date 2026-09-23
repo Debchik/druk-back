@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -64,6 +64,24 @@ class MessageDao:
     @classmethod
     async def get_reply(cls: type['MessageDao'], db: AsyncSession, message_id: UUID) -> Optional[Message]:
         return await db.scalar(sa.select(Message).where(Message.reply_to_message_id == message_id, Message.role == 'assistant'))
+
+    @classmethod
+    async def count_recent_user_messages(
+        cls: type['MessageDao'],
+        db: AsyncSession,
+        chat_id: UUID,
+        created_at: datetime,
+        window_seconds: int = 5,
+    ) -> int:
+        result = await db.scalar(
+            sa.select(sa.func.count(Message.id)).where(
+                Message.chat_id == chat_id,
+                Message.role == 'user',
+                Message.created_at >= created_at - timedelta(seconds=window_seconds),
+                Message.created_at <= created_at,
+            )
+        )
+        return int(result or 0)
 
     @classmethod
     async def create(

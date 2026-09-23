@@ -27,6 +27,8 @@ class GeminiConfig(BaseSettings):
     transcription_model: Optional[str] = None
     tts_model: str = 'gemini-3.1-flash-tts-preview'
     tts_voice: str = 'Kore'
+    tts_male_voice: str = 'Puck'
+    tts_female_voice: str = 'Kore'
     tts_response_format: Optional[str] = None
     native_base_url: Optional[str] = 'https://api.artemox.com'
     embedding_model: str = 'gemini-embedding-001'
@@ -43,6 +45,7 @@ class TelegramConfig(BaseSettings):
     polling_timeout: int = 25
     link_token_ttl_minutes: int = 10
     proxy_url: Optional[str] = None
+    sticker_file_ids: str = ''
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
 

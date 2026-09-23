@@ -207,7 +207,7 @@ class MessageService:
                     'Обязательно подтверди пользователю, что ты напомнишь ему. Не говори, что у тебя нет технической возможности '
                     'отправлять сообщения по расписанию.'
                 )
-            reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
+            reply_text = cls._normalize_reply(await GeminiAIService.generate_reply(system_prompt, prompt_messages))
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)
             await MessageDao.mark_failed(db, message, str(error))
@@ -227,6 +227,10 @@ class MessageService:
         message, assistant = await MessageDao.commit_pair(db, message, assistant)
         logger.info('message_processing_completed message_id=%s assistant_id=%s', message.id, assistant.id)
         return message, assistant, telegram_id, telegram_connected
+
+    @classmethod
+    def _normalize_reply(cls: type['MessageService'], text: str) -> str:
+        return text.replace('—', '-').replace('–', '-').strip()
 
     @classmethod
     async def cancel_message(

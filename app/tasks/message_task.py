@@ -1,11 +1,15 @@
 import asyncio
+from contextlib import suppress
 from typing import Any, Dict
 from uuid import UUID
 
 from celery import Task
 
 from app.celery_app import celery_app
+from app.dao.chat_dao import ChatDao
 from app.database import async_session
+from app.dao.message_dao import MessageDao
+from app.dao.user_dao import UserDao
 from app.logging import logger
 from app.services.message_service import MessageService
 from app.services.redis_task_service import RedisTaskService
@@ -24,7 +28,7 @@ class ProcessMessageTask(Task):
         task_id = self.request.id or ''
         RedisTaskService.save_state(message_id, task_id, 'running')
         try:
-            message, assistant, telegram_id, telegram_connected = asyncio.run(self._process_message(message_id))
+            message, assistant, telegram_id, telegram_connected = asyncio.run(self._process_message_with_typing(message_id))
             if message.status == 'cancelled':
                 RedisTaskService.save_state(message_id, task_id, 'cancelled')
                 logger.info('celery_message_task_cancelled message_id=%s task_id=%s', message_id, task_id)
@@ -32,6 +36,7 @@ class ProcessMessageTask(Task):
             if message.platform == 'telegram' and assistant is not None and telegram_id is not None:
                 from app.services.telegram_service import TelegramService
 
+                reply_to_message_id = asyncio.run(self._get_reply_to_message_id(message))
                 telegram_message_id = asyncio.run(
                     TelegramService.send_assistant_response(
                         telegram_id,
@@ -39,6 +44,7 @@ class ProcessMessageTask(Task):
                         assistant.content,
                         telegram_connected,
                         message.message_type == 'audio_request',
+                        reply_to_message_id,
                     )
                 )
                 if telegram_message_id is not None:
@@ -113,6 +119,47 @@ class ProcessMessageTask(Task):
     ) -> Any:
         async with async_session() as session:
             return await MessageService.process_message(session, UUID(message_id))
+
+    async def _process_message_with_typing(
+        self: 'ProcessMessageTask',
+        message_id: str,
+    ) -> Any:
+        from app.services.telegram_service import TelegramService
+
+        telegram_id = None
+        async with async_session() as session:
+            message = await MessageDao.get_by_id(session, UUID(message_id))
+            if message is not None and message.platform == 'telegram':
+                chat = await ChatDao.get_by_id(session, message.chat_id)
+                if chat is not None:
+                    user = await UserDao.get_by_id(session, chat.user_id)
+                    telegram_id = user.telegram_id if user is not None else None
+        typing_task = None
+        if telegram_id is not None:
+            typing_task = asyncio.create_task(TelegramService.typing_loop(telegram_id))
+        try:
+            return await self._process_message(message_id)
+        finally:
+            if typing_task is not None:
+                typing_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await typing_task
+
+    async def _get_reply_to_message_id(self: 'ProcessMessageTask', message: Any) -> Any:
+        if message.platform != 'telegram' or not message.external_id:
+            return None
+        async with async_session() as session:
+            count = await MessageDao.count_recent_user_messages(
+                session,
+                message.chat_id,
+                message.created_at,
+            )
+        if count < 2:
+            return None
+        try:
+            return int(message.external_id.rsplit(':', 1)[-1])
+        except (TypeError, ValueError):
+            return None
 
 
 process_message_task = celery_app.register_task(ProcessMessageTask())
