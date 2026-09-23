@@ -229,7 +229,7 @@ class TelegramService:
         for explicit_part in explicit_parts:
             parts = re.split(r'(?<!\.)\.(?!\.)\s+(?=[^\s.])', explicit_part)
             for part in parts:
-                clean_part = part.strip()
+                clean_part = part.strip().rstrip('.')
                 if not clean_part:
                     continue
                 sentence_parts.append(clean_part)

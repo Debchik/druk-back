@@ -148,14 +148,6 @@ class ProcessMessageTask(Task):
     async def _get_reply_to_message_id(self: 'ProcessMessageTask', message: Any) -> Any:
         if message.platform != 'telegram' or not message.external_id:
             return None
-        async with async_session() as session:
-            count = await MessageDao.count_recent_user_messages(
-                session,
-                message.chat_id,
-                message.created_at,
-            )
-        if count < 2:
-            return None
         try:
             return int(message.external_id.rsplit(':', 1)[-1])
         except (TypeError, ValueError):
