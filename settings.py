@@ -42,6 +42,7 @@ class TelegramConfig(BaseSettings):
     bot_username: str = ''
     webhook_secret: str = ''
     mode: str = 'webhook'
+    show_connect_button: bool = True
     polling_timeout: int = 25
     link_token_ttl_minutes: int = 10
     proxy_url: Optional[str] = None

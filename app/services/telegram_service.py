@@ -218,17 +218,29 @@ class TelegramService:
     def _split_message(cls: type['TelegramService'], text: str) -> List[str]:
         max_length = 4096
         normalized_text = text.replace('—', '-').replace('–', '-')
-        explicit_parts = [part.strip() for part in normalized_text.split('[[MESSAGE_BREAK]]') if part.strip()]
+        explicit_parts = [
+            part.strip()
+            for part in re.split(r'\s*(?:\[\[MESSAGE_BREAK\]\]|\n+)\s*', normalized_text)
+            if part.strip()
+        ]
         if not explicit_parts:
             explicit_parts = [normalized_text.strip()]
-        result: List[str] = []
+        sentence_parts: List[str] = []
         for explicit_part in explicit_parts:
-            if len(explicit_part) <= max_length:
-                result.append(explicit_part)
+            parts = re.split(r'(?<!\.)\.(?!\.)\s+(?=[^\s.])', explicit_part)
+            for part in parts:
+                clean_part = part.strip()
+                if not clean_part:
+                    continue
+                sentence_parts.append(clean_part)
+        result: List[str] = []
+        for sentence_part in sentence_parts:
+            if len(sentence_part) <= max_length:
+                result.append(sentence_part)
             else:
                 result.extend(
-                    explicit_part[index:index + max_length]
-                    for index in range(0, len(explicit_part), max_length)
+                    sentence_part[index:index + max_length]
+                    for index in range(0, len(sentence_part), max_length)
                 )
         if len(result) > 1:
             logger.info('Ответ Telegram разделен на сообщения count=%s', len(result))
@@ -244,12 +256,31 @@ class TelegramService:
         send_audio: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> Optional[int]:
-        telegram_message_id = await cls.send_message(
-            chat_id,
-            text,
-            cls._connect_keyboard(telegram_connected),
-            reply_to_message_id,
-        )
+        sticker_requested = '[[SEND_STICKER]]' in text or re.search(r'\[Стикер\]', text, flags=re.IGNORECASE) is not None
+        clean_text = text.replace('[[SEND_STICKER]]', '').strip()
+        clean_text = re.sub(r'\[Стикер\]', '', clean_text, flags=re.IGNORECASE).strip()
+        sticker_file_ids = [item.strip() for item in config.telegram.sticker_file_ids.split(',') if item.strip()]
+        if sticker_requested and sticker_file_ids:
+            telegram_message_id = None
+            if clean_text:
+                telegram_message_id = await cls.send_message(
+                    chat_id,
+                    clean_text,
+                    cls._connect_keyboard(telegram_connected),
+                    reply_to_message_id,
+                )
+            sticker_message_id = await cls.send_sticker(chat_id, secrets.choice(sticker_file_ids), reply_to_message_id)
+            if telegram_message_id is None:
+                telegram_message_id = sticker_message_id
+        else:
+            if sticker_requested and not sticker_file_ids:
+                logger.warning('Запрошен стикер, но TELEGRAM_STICKER_FILE_IDS не настроен')
+            telegram_message_id = await cls.send_message(
+                chat_id,
+                clean_text or text,
+                cls._connect_keyboard(telegram_connected),
+                reply_to_message_id,
+            )
         if send_audio:
             from app.tasks.speech_task import process_speech_task
 
@@ -521,7 +552,7 @@ class TelegramService:
 
     @classmethod
     def _connect_keyboard(cls: type['TelegramService'], connected: bool = False) -> Dict[str, Any]:
-        if connected:
+        if connected or not config.telegram.show_connect_button:
             return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
 

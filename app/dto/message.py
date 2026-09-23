@@ -23,7 +23,7 @@ class MessageResponse(BaseModel):
 
     @field_serializer('content')
     def serialize_content(self, value: str) -> str:
-        return value.replace('[[MESSAGE_BREAK]]', '\n\n')
+        return value.replace('[[MESSAGE_BREAK]]', '\n\n').replace('[[SEND_STICKER]]', '').replace('[Стикер]', '')
 
 
 class MessageTaskResponse(BaseModel):
