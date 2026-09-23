@@ -78,6 +78,7 @@ class ProcessMessageTask(Task):
                                         chat,
                                         profile,
                                         telegram_id,
+                                        '[[SEND_STICKER]]' not in assistant.content and '[Стикер]' not in assistant.content,
                                     )
 
                         asyncio.run(create_character_reaction())

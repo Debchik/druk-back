@@ -227,14 +227,28 @@ class TelegramService:
             explicit_parts = [normalized_text.strip()]
         sentence_parts: List[str] = []
         for explicit_part in explicit_parts:
-            parts = re.split(r'(?<!\.)\.(?!\.)\s+(?=[^\s.])', explicit_part)
+            parts = re.split(r'(?<![.!?,;])[.!?,;](?![.!?,;])\s+(?=[^\s])', explicit_part)
+            if len(parts) > 1:
+                last_part = parts[-1].strip()
+                if (
+                    len(last_part.split()) <= 2
+                    and last_part[:1].isupper()
+                    and re.search(r',\s*' + re.escape(last_part) + r'\s*$', explicit_part) is not None
+                ):
+                    parts = parts[:-1]
             for part in parts:
-                clean_part = part.strip().rstrip('.')
+                clean_part = part.strip().rstrip('.,!?;')
                 if not clean_part:
                     continue
                 sentence_parts.append(clean_part)
-        result: List[str] = []
+        merged_parts: List[str] = []
         for sentence_part in sentence_parts:
+            if merged_parts and cls._is_standalone_emoji(sentence_part):
+                merged_parts[-1] = f'{merged_parts[-1]} {sentence_part}'
+            else:
+                merged_parts.append(sentence_part)
+        result: List[str] = []
+        for sentence_part in merged_parts:
             if len(sentence_part) <= max_length:
                 result.append(sentence_part)
             else:
@@ -245,6 +259,13 @@ class TelegramService:
         if len(result) > 1:
             logger.info('Ответ Telegram разделен на сообщения count=%s', len(result))
         return result
+
+    @classmethod
+    def _is_standalone_emoji(cls: type['TelegramService'], text: str) -> bool:
+        value = text.strip()
+        if not value or len(value) > 8:
+            return False
+        return not any(character.isalnum() for character in value)
 
     @classmethod
     async def send_assistant_response(

@@ -119,6 +119,7 @@ class ReactionService:
         chat: Chat,
         profile: UserProfile,
         telegram_chat_id: int,
+        allow_sticker: bool = True,
     ) -> Optional[ReactionEvent]:
         if message.platform != 'telegram' or message.role != 'user' or not message.external_id:
             return None
@@ -128,7 +129,7 @@ class ReactionService:
         decision = await cls._choose_reaction(character, profile, message.content)
         emoji = decision.get('emoji')
         should_react = decision.get('should_react') is True and emoji in cls._allowed_emojis
-        should_send_sticker = decision.get('send_sticker') is True
+        should_send_sticker = allow_sticker and decision.get('send_sticker') is True
         sticker_file_ids = [item.strip() for item in config.telegram.sticker_file_ids.split(',') if item.strip()]
         if not should_react and not (should_send_sticker and sticker_file_ids):
             return None
