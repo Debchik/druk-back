@@ -22,6 +22,7 @@ from app.models.user import User
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
 from app.services.message_service import MessageService
+from app.services.media_quota_service import MediaQuotaExceeded
 from app.services.media_service import MediaService
 from app.services.onboarding_service import OnboardingService
 from app.services.rate_limit_service import RateLimitService
@@ -518,6 +519,28 @@ class TelegramService:
                 return
             if media_payload is not None:
                 file_id, mime_type, filename, message_type = media_payload
+                external_id = (
+                    f'{telegram_chat_id}:{message["message_id"]}'
+                    if message.get('message_id') is not None
+                    else None
+                )
+                try:
+                    await MediaService.preflight_upload(
+                        db,
+                        chat.user_id,
+                        chat.id,
+                        'telegram',
+                        message_type,
+                        external_id,
+                    )
+                except MediaQuotaExceeded as error:
+                    await cls.send_message(
+                        telegram_chat_id,
+                        error.user_message,
+                        cls._connect_keyboard(is_platform_connected),
+                    )
+                    return
+
                 media_limits = {
                     'audio': config.media.max_audio_bytes,
                     'image': config.media.max_image_bytes,
@@ -525,17 +548,25 @@ class TelegramService:
                     'sticker': config.media.max_image_bytes,
                 }
                 media_data = await asyncio.to_thread(cls._download_file, file_id, media_limits[message_type])
-                _, _, task_id = await MediaService.create_asset_message(
-                    db,
-                    chat.user_id,
-                    chat.id,
-                    media_data,
-                    filename,
-                    mime_type,
-                    'telegram',
-                    f'{telegram_chat_id}:{message["message_id"]}' if message.get('message_id') is not None else None,
-                    message_type,
-                )
+                try:
+                    _, _, task_id = await MediaService.create_asset_message(
+                        db,
+                        chat.user_id,
+                        chat.id,
+                        media_data,
+                        filename,
+                        mime_type,
+                        'telegram',
+                        external_id,
+                        message_type,
+                    )
+                except MediaQuotaExceeded as error:
+                    await cls.send_message(
+                        telegram_chat_id,
+                        error.user_message,
+                        cls._connect_keyboard(is_platform_connected),
+                    )
+                    return
                 logger.info(
                     'telegram_media_enqueued chat_suffix=%s type=%s task_id=%s',
                     str(telegram_chat_id)[-4:],

@@ -17,12 +17,36 @@ from app.models.message import Message
 from app.services.local_storage_service import LocalStorageService
 from app.services.media_ai_service import GeminiMultimodalService
 from app.services.media_probe_service import MediaProbeService
+from app.services.media_quota_service import MediaQuotaService
 from app.services.redis_task_service import RedisTaskService
 from settings import config
 
 
 class MediaService:
     _allowed_types = {'audio', 'image', 'video', 'sticker'}
+
+    @classmethod
+    async def preflight_upload(
+        cls: type['MediaService'],
+        db: AsyncSession,
+        user_id: UUID,
+        chat_id: UUID,
+        platform: str,
+        message_type: str,
+        external_id: Optional[str] = None,
+    ) -> bool:
+        if external_id is not None:
+            existing_message = await MessageDao.get_by_external_id(db, platform, external_id)
+            if existing_message is not None and existing_message.chat_id == chat_id:
+                return False
+        return await MediaQuotaService.ensure_upload_allowed(
+            db,
+            user_id,
+            chat_id,
+            message_type,
+            platform,
+            lock_user=False,
+        )
 
     @classmethod
     async def create_asset_message(
@@ -48,6 +72,16 @@ class MediaService:
                 existing_assets = await MediaAssetDao.list_for_message(db, existing_message.id)
                 if existing_assets:
                     return existing_message, existing_assets[0], RedisTaskService.get_task_id(str(existing_assets[0].id)) or ''
+
+        trial_limited = await MediaQuotaService.ensure_upload_allowed(
+            db,
+            user_id,
+            chat_id,
+            message_type,
+            platform,
+            lock_user=True,
+        )
+
         message = await MessageDao.create(
             db,
             chat_id,
@@ -70,6 +104,11 @@ class MediaService:
             mime_type=mime_type,
             size_bytes=len(data),
         )
+        if message_type == 'video' and trial_limited:
+            asset.metadata_json = {
+                'preview_limit_seconds': config.media.new_user_video_preview_seconds,
+                'trial_limited': True,
+            }
         await db.commit()
         await db.refresh(message)
         await db.refresh(asset)
@@ -181,19 +220,42 @@ class MediaService:
         try:
             path = LocalStorageService.get_path(asset.storage_key or '')
             duration = await MediaProbeService.duration_seconds(path)
-            if duration > config.media.max_video_duration_seconds:
-                raise ValueError('Видео превышает допустимую длительность')
-            frames, audio_data = await cls._extract_video_media(path)
+            metadata = dict(asset.metadata_json or {})
+            preview_limit = metadata.get('preview_limit_seconds')
+            if preview_limit is not None:
+                duration_limit = int(preview_limit)
+                truncated = duration > duration_limit
+            else:
+                duration_limit = config.media.max_video_duration_seconds
+                truncated = False
+                if duration > duration_limit:
+                    raise ValueError('Видео превышает допустимую длительность')
+
+            frames, audio_data = await cls._extract_video_media(path, duration_limit)
             audio_transcript: Optional[str] = None
             if audio_data is not None:
                 audio_transcript = await GeminiMultimodalService.transcribe_audio(audio_data, 'audio/wav')
             description = await GeminiMultimodalService.describe_video_frames(frames, audio_transcript)
             asset.duration_seconds = duration
-            asset.metadata_json = {'frames_count': len(frames), 'frame_interval_seconds': config.media.video_frame_interval_seconds}
+            metadata.update(
+                {
+                    'frames_count': len(frames),
+                    'frame_interval_seconds': config.media.video_frame_interval_seconds,
+                    'source_duration_seconds': duration,
+                    'processed_duration_seconds': min(duration, duration_limit),
+                    'truncated': truncated,
+                }
+            )
+            asset.metadata_json = metadata
             await MediaAssetDao.mark_completed(db, asset, audio_transcript, description)
             content_parts = [f'[Видео]\nОписание: {description}']
             if audio_transcript:
                 content_parts.append(f'Транскрипт аудио: {audio_transcript}')
+            if truncated:
+                content_parts.append(
+                    f'[Видео длиннее лимита: просмотрены только первые {duration_limit} секунд. '
+                    'Нужно прямо и коротко сообщить об этом пользователю.]'
+                )
             message.content = '\n'.join(content_parts)
             await cls._enqueue_message(db, message)
         except Exception as error:
@@ -245,8 +307,12 @@ class MediaService:
         logger.exception('media_processing_failed asset_id=%s message_id=%s', asset.id, message.id)
 
     @classmethod
-    async def _extract_video_media(cls: type['MediaService'], path: Path) -> Tuple[List[bytes], Optional[bytes]]:
-        return await asyncio.to_thread(cls._extract_video_media_sync, path)
+    async def _extract_video_media(
+        cls: type['MediaService'],
+        path: Path,
+        duration_limit_seconds: int,
+    ) -> Tuple[List[bytes], Optional[bytes]]:
+        return await asyncio.to_thread(cls._extract_video_media_sync, path, duration_limit_seconds)
 
     @classmethod
     async def _prepare_audio(
@@ -269,13 +335,18 @@ class MediaService:
             return output_path.read_bytes(), 'audio/wav'
 
     @classmethod
-    def _extract_video_media_sync(cls: type['MediaService'], path: Path) -> Tuple[List[bytes], Optional[bytes]]:
+    def _extract_video_media_sync(
+        cls: type['MediaService'],
+        path: Path,
+        duration_limit_seconds: int,
+    ) -> Tuple[List[bytes], Optional[bytes]]:
         with tempfile.TemporaryDirectory(prefix='ai-companion-video-') as directory:
             directory_path = Path(directory)
             frames_path = directory_path / 'frame-%05d.jpg'
             fps = f'1/{config.media.video_frame_interval_seconds}'
             frame_command = [
-                'ffmpeg', '-y', '-v', 'error', '-i', str(path), '-vf', f'fps={fps}',
+                'ffmpeg', '-y', '-v', 'error', '-i', str(path),
+                '-t', str(duration_limit_seconds), '-vf', f'fps={fps}',
                 '-frames:v', str(config.media.video_max_frames), '-q:v', '4', str(frames_path),
             ]
             subprocess.run(frame_command, check=True, capture_output=True)
@@ -283,7 +354,7 @@ class MediaService:
             audio_path = directory_path / 'audio.wav'
             audio_command = [
                 'ffmpeg', '-y', '-v', 'error', '-i', str(path), '-vn', '-ac', '1', '-ar', '16000',
-                '-t', str(config.media.max_video_duration_seconds), str(audio_path),
+                '-t', str(duration_limit_seconds), str(audio_path),
             ]
             audio_result = subprocess.run(audio_command, capture_output=True)
             audio_data = audio_path.read_bytes() if audio_result.returncode == 0 and audio_path.exists() else None

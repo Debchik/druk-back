@@ -8,6 +8,7 @@ from app.dependencies import current_user
 from app.dto.media import MediaTaskResponse
 from app.logging import logger
 from app.models.user import User
+from app.services.media_quota_service import MediaQuotaExceeded
 from app.services.media_service import MediaService
 from settings import config
 
@@ -31,6 +32,19 @@ async def upload_media(
         message_type = 'video'
     else:
         raise HTTPException(status_code=415, detail='Поддерживаются audio, image и video файлы')
+    try:
+        await MediaService.preflight_upload(
+            db,
+            user.id,
+            chat_id,
+            'web',
+            message_type,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except MediaQuotaExceeded as error:
+        raise HTTPException(status_code=429, detail=error.user_message)
+
     limits = {
         'audio': config.media.max_audio_bytes,
         'image': config.media.max_image_bytes,
@@ -64,6 +78,8 @@ async def upload_media(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error))
+    except MediaQuotaExceeded as error:
+        raise HTTPException(status_code=429, detail=error.user_message)
     except ValueError as error:
         raise HTTPException(status_code=413, detail=str(error))
     return MediaTaskResponse(
