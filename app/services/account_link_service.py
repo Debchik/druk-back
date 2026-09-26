@@ -109,11 +109,6 @@ class AccountLinkService:
             raise RuntimeError('No active companion configured')
         await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'web', 'Web chat')
         await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'telegram', 'Telegram chat')
-        selected_boyfriend = await BoyfriendDao.get_for_gender(db, target_profile.companion_gender)
-        if selected_boyfriend is not None:
-            chats = await ChatDao.list_for_user(db, target_user.id)
-            for chat in chats:
-                await ChatDao.set_boyfriend(db, chat, selected_boyfriend.id)
         logger.info('account_link_platform_chats_ready user_id=%s', target_user.id)
 
     @classmethod

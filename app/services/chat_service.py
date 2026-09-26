@@ -24,7 +24,7 @@ class ChatService:
         boyfriend = await BoyfriendDao.get_active(db, boyfriend_id)
         if boyfriend is None:
             logger.warning('chat_service_boyfriend_not_found boyfriend_id=%s', boyfriend_id)
-            raise LookupError('Boyfriend not found')
+            raise LookupError('Companion not found')
         chat = await ChatDao.ensure_for_platform(db, user_id, boyfriend.id, 'web', title)
         chat = await ChatDao.commit(db, chat)
         logger.info('chat_service_created chat_id=%s user_id=%s', chat.id, user_id)

@@ -77,7 +77,7 @@ class ProactiveConfig(BaseSettings):
 
 class MemoryConfig(BaseSettings):
     enabled: bool = True
-    model: str = 'gemini-3.1-flash-lite'
+    model: str = 'gemini-2.5-flash-lite'
     max_context_items: int = Field(default=8, ge=1, le=50)
     max_context_episodes: int = Field(default=3, ge=0, le=20)
     max_context_events: int = Field(default=5, ge=0, le=20)
@@ -91,7 +91,7 @@ class MemoryConfig(BaseSettings):
 
 class SafetyConfig(BaseSettings):
     enabled: bool = True
-    model: str = 'gemini-3.1-flash-lite'
+    model: str = 'gemini-2.5-flash-lite'
     llm_input_enabled: bool = False
     output_audit_enabled: bool = False
     model_config = SettingsConfigDict(env_prefix='SAFETY_', env_file='.env', extra='ignore')
@@ -140,7 +140,7 @@ class Settings(BaseSettings):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
     debug: bool = False
-    app_title: str = 'AI boyfriend MVP'
+    app_title: str = 'Друк — спутник по жизни'
     platform_url: str = 'http://localhost:3000'
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 

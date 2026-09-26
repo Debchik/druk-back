@@ -27,6 +27,9 @@ class ReminderService:
         user_message: Message,
     ) -> Optional[ProactiveMessage]:
         logger.info('reminder_analysis_started message_id=%s chat_id=%s', user_message.id, chat.id)
+        if not cls._has_explicit_request(user_message.content):
+            logger.info('reminder_analysis_skipped reason=no_explicit_request message_id=%s', user_message.id)
+            return None
         decision = await cls._analyze(profile, user_message.content)
         if not decision.get('should_schedule'):
             logger.info('reminder_analysis_not_scheduled message_id=%s', user_message.id)
@@ -78,6 +81,10 @@ class ReminderService:
         return proactive_message
 
     @classmethod
+    def _has_explicit_request(cls: type['ReminderService'], message: str) -> bool:
+        return bool(re.search(r'(?iu)\b(?:напомн\w*|напоминан\w*|remind\w*)\b', message))
+
+    @classmethod
     async def _analyze(
         cls: type['ReminderService'],
         profile: UserProfile,
@@ -90,7 +97,8 @@ class ReminderService:
         now = datetime.now(user_zone)
         system_prompt = (
             'Ты классификатор напоминаний. Проанализируй последнее сообщение пользователя и определи, '
-            'просит ли он создать напоминание на конкретное будущее время.\n'
+            'явно ли он просит создать напоминание на конкретное будущее время.\n'
+            'Простое упоминание будущего события, встречи или тревоги не является просьбой напомнить.\n'
             f'Текущая дата и время пользователя: {now.isoformat()}.\n'
             f'Часовой пояс пользователя: {profile.timezone}.\n'
             'Если пользователь просит напомнить, верни should_schedule=true, точное время в ISO 8601 '

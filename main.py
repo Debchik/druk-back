@@ -31,7 +31,7 @@ class ApplicationLifecycle:
             logger.info('database_schema_ready')
             main_app.state.db = self.session_factory
             async with self.session_factory() as session:
-                await BoyfriendDao.ensure_default_pair(session)
+                await BoyfriendDao.ensure_druk(session)
             logger.info('default_companion_ready')
             if config.telegram.mode.lower() == 'polling':
                 if not config.telegram.bot_token:

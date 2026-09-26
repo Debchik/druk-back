@@ -22,7 +22,7 @@ class CharacterVersion(Base):
     style: Mapped[str] = mapped_column(sa.Text)
     boundaries: Mapped[str] = mapped_column(sa.Text)
     system_prompt: Mapped[str] = mapped_column(sa.Text)
-    role_type: Mapped[str] = mapped_column(sa.String(30), default='boyfriend')
+    role_type: Mapped[str] = mapped_column(sa.String(30), default='companion')
     gender: Mapped[str] = mapped_column(sa.String(30), default='male')
     pronouns: Mapped[Optional[str]] = mapped_column(sa.String(120), nullable=True)
     voice_profile: Mapped[Optional[str]] = mapped_column(sa.String(120), nullable=True)

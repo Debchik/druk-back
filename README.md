@@ -1,4 +1,4 @@
-### AI boyfriend MVP backend
+### Друк — спутник по жизни
 
 Минимальный backend для MVP: регистрация, профили, персонажи, чаты, простая память, Gemini и Telegram webhook.
 
@@ -61,7 +61,7 @@ worker сохраняет в общую историю. Для повторяе�
 `scheduled_at` в будущем, например `2026-09-08T18:30:00+03:00`.
 
 Основные маршруты: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`,
-`GET /api/v1/auth/me`, `GET /api/v1/boyfriends`, `POST /api/v1/chats`,
+`GET /api/v1/auth/me`, `GET /api/v1/companions`, `POST /api/v1/chats`,
 `POST /api/v1/chats/{chat_id}/messages`,
 `POST /api/v1/chats/{chat_id}/messages/{message_id}/cancel`,
 `GET /api/v1/memory/facts`, `DELETE /api/v1/memory/facts/{fact_id}`,

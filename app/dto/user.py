@@ -25,7 +25,7 @@ class UserProfileResponse(BaseModel):
 
 
 class UserProfileUpdateRequest(BaseModel):
-    companion_role: str | None = Field(default=None, pattern='^(boyfriend|girlfriend)$')
+    companion_role: str | None = Field(default=None, pattern='^companion$')
     companion_gender: str | None = Field(default=None, pattern='^(male|female|non_binary|unspecified)$')
     user_gender: str | None = Field(default=None, pattern='^(male|female|non_binary|unspecified)$')
     user_pronouns: str | None = Field(default=None, max_length=120)

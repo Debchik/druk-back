@@ -13,7 +13,7 @@ class UserProfile(Base):
     __tablename__ = 'user_profiles'
 
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
-    companion_role: Mapped[str] = mapped_column(sa.String(30), default='boyfriend')
+    companion_role: Mapped[str] = mapped_column(sa.String(30), default='companion')
     companion_gender: Mapped[str] = mapped_column(sa.String(30), default='male')
     user_gender: Mapped[str] = mapped_column(sa.String(30), default='unspecified')
     user_pronouns: Mapped[Optional[str]] = mapped_column(sa.String(120), nullable=True)

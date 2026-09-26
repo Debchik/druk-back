@@ -63,41 +63,9 @@ class CharacterVersionDao:
             'Тёплый, внимательный, живой и уважительный стиль общения.',
             'Не выдавай себя за реального человека, не поощряй зависимость и не нарушай границы пользователя.',
             system_prompt,
-            'boyfriend',
+            'companion',
             'male',
             'он/его',
-            None,
-            'v1',
-        )
-        await db.commit()
-        await db.refresh(character)
-        return character
-
-    @classmethod
-    async def ensure_default_for_gender(
-        cls: type['CharacterVersionDao'],
-        db: AsyncSession,
-        boyfriend_id: UUID,
-        name: str,
-        system_prompt: str,
-        role_type: str,
-        gender: str,
-        pronouns: str,
-    ) -> CharacterVersion:
-        active = await cls.get_active(db, boyfriend_id)
-        if active is not None:
-            return active
-        character = await cls.create(
-            db,
-            boyfriend_id,
-            1,
-            name,
-            'Теплый, внимательный, живой и уважительный стиль общения.',
-            'Не выдавай себя за реального человека и уважай границы пользователя.',
-            system_prompt,
-            role_type,
-            gender,
-            pronouns,
             None,
             'v1',
         )

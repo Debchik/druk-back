@@ -25,7 +25,8 @@ from app.services.feedback_service import FeedbackService
 router = APIRouter(tags=['chat'])
 
 
-@router.get('/boyfriends', response_model=List[BoyfriendResponse])
+@router.get('/boyfriends', response_model=List[BoyfriendResponse], include_in_schema=False)
+@router.get('/companions', response_model=List[BoyfriendResponse])
 async def list_boyfriends(db: AsyncSession = Depends(get_db)) -> List[Boyfriend]:
     return await BoyfriendService.list_active(db)
 

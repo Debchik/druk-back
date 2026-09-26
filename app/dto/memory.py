@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 FactKind = Literal[
@@ -38,6 +38,16 @@ class PersonCandidate(BaseModel):
     confidence: float = Field(ge=0, le=1)
     sensitivity: Literal['normal', 'private', 'sensitive'] = 'normal'
     store: bool = True
+
+    @field_validator('relation_to_user', 'disambiguator', mode='before')
+    @classmethod
+    def empty_optional_text(cls, value: object) -> object:
+        return '' if value is None else value
+
+    @field_validator('notes', mode='before')
+    @classmethod
+    def empty_notes(cls, value: object) -> object:
+        return [] if value is None else value
 
 
 class DeletionRequest(BaseModel):

@@ -25,6 +25,7 @@ from app.services.message_service import MessageService
 from app.services.media_quota_service import MediaQuotaExceeded
 from app.services.media_service import MediaService
 from app.services.onboarding_service import OnboardingService
+from app.services.druk_persona import FIRST_GREETING, RETURN_GREETING, AFTER_NAME_GREETING
 from app.services.rate_limit_service import RateLimitService
 from app.services.feedback_service import FeedbackService
 from settings import config
@@ -50,11 +51,9 @@ class TelegramService:
         chat = await ChatDao.get_for_platform(db, user.id, 'telegram')
         if chat is not None:
             return chat
-        boyfriend = await BoyfriendDao.get_for_gender(db, 'male')
+        boyfriend = await BoyfriendDao.get_first_active(db)
         if boyfriend is None:
-            boyfriend = await BoyfriendDao.get_first_active(db)
-        if boyfriend is None:
-            raise RuntimeError('No active boyfriend configured')
+            raise RuntimeError('No active companion configured')
         chat = await ChatDao.create(db, user.id, boyfriend.id, 'Telegram chat', 'telegram')
         return await ChatDao.commit(db, chat)
 
@@ -439,15 +438,10 @@ class TelegramService:
                     logger.warning('telegram_account_link_rejected chat_suffix=%s reason=%s', str(telegram_chat_id)[-4:], error)
                     await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard(is_platform_connected))
                 return
-            if is_platform_connected:
-                chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
-                onboarding = await OnboardingService.start(db, chat.user_id)
-                greeting = 'Привет! Я рядом.'
-                await cls.send_message(telegram_chat_id, f'{greeting}\n\n{onboarding.question or "Онбординг завершен."}', cls._connect_keyboard(True))
-            else:
-                chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
-                onboarding = await OnboardingService.start(db, chat.user_id)
-                await cls.send_message(telegram_chat_id, f'Привет! Я рядом.\n\n{onboarding.question or "Нажми кнопку, чтобы подключить Telegram к платформе."}', cls._connect_keyboard(False))
+            chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+            onboarding = await OnboardingService.start(db, chat.user_id)
+            greeting = FIRST_GREETING if onboarding.status != 'completed' else RETURN_GREETING
+            await cls.send_message(telegram_chat_id, greeting, cls._connect_keyboard(is_platform_connected))
             return
         if text == 'Подключиться к платформе':
             if is_platform_connected:
@@ -492,7 +486,7 @@ class TelegramService:
                 if not text:
                     await cls.send_message(
                         telegram_chat_id,
-                        f'Сначала ответь текстом на вопрос onboarding:\n\n{onboarding.question}',
+                        f'Для начала напиши, как тебя зовут.\n\n{onboarding.question}',
                         cls._connect_keyboard(is_platform_connected),
                     )
                     return
@@ -513,7 +507,7 @@ class TelegramService:
                     return
                 await cls.send_message(
                     telegram_chat_id,
-                    onboarding.question or 'Онбординг завершен. Теперь можно общаться.',
+                    AFTER_NAME_GREETING,
                     cls._connect_keyboard(is_platform_connected),
                 )
                 return
@@ -617,7 +611,7 @@ class TelegramService:
     ) -> None:
         messages = await MessageDao.list_recent_assistant_for_chat(db, chat_id, 5)
         if not messages:
-            await cls.send_message(telegram_chat_id, 'Пока нет сообщений персонажа для оценки.')
+            await cls.send_message(telegram_chat_id, 'Пока нет ответов Друка для оценки.')
             return
         rows = []
         for message in messages:
@@ -625,7 +619,7 @@ class TelegramService:
             rows.append([{'text': snippet, 'callback_data': f'fb:m:{message.id}'}])
         await cls.send_message(
             telegram_chat_id,
-            'Выбери последнее сообщение персонажа, которое хочешь оценить:',
+            'Выбери ответ Друка, который хочешь оценить:',
             {'inline_keyboard': rows},
         )
 
