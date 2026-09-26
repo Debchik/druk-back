@@ -14,7 +14,6 @@ from app.dao.user_profile_dao import UserProfileDao
 from app.dao.user_dao import UserDao
 from app.logging import logger
 from app.models.message import Message
-from app.services.companion_prompt_service import CompanionPromptService
 from app.services.gemini_service import GeminiAIService
 from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.memory_service import MemoryService
@@ -22,9 +21,19 @@ from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 from app.services.reminder_service import ReminderService
 from app.services.safety_service import SafetyService
+from app.services.companion_prompt_service import CompanionPromptService
+from app.services.feedback_service import FeedbackService
 
 
 class MessageService:
+    @classmethod
+    async def is_telegram_reply_delivered(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        message_id: UUID,
+    ) -> bool:
+        return await MessageDao.is_telegram_reply_delivered(db, message_id)
+
     @classmethod
     async def attach_external_id(
         cls: type['MessageService'],
@@ -181,7 +190,6 @@ class MessageService:
         message.error_message = None
         await db.commit()
         await db.refresh(message)
-
         try:
             safety = await SafetyService.check_input(message.content)
             if safety.decision != 'allow':
@@ -236,6 +244,7 @@ class MessageService:
                 'реально двигает разговор дальше. Не поощряй зависимость, эксклюзивность или изоляцию от близких.'
                 + MemoryService.render_prompt_context(memory_context)
             )
+            system_prompt += await FeedbackService.build_context(db, chat.user_id, chat.id)
             if reminder is not None:
                 system_prompt += (
                     '\n\nСистемное событие: напоминание успешно создано и поставлено в очередь. '
@@ -247,6 +256,7 @@ class MessageService:
             audit = await SafetyService.audit_output(message.content, reply_text, memory_context)
             if not audit.approved or audit.rewrite_needed:
                 reply_text = await SafetyService.rewrite_output(message.content, reply_text, memory_context, audit)
+            reply_text = cls._normalize_reply(reply_text)
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)
             await MessageDao.mark_failed(db, message, str(error))
@@ -266,6 +276,10 @@ class MessageService:
         message, assistant = await MessageDao.commit_pair(db, message, assistant)
         logger.info('message_processing_completed message_id=%s assistant_id=%s', message.id, assistant.id)
         return message, assistant, telegram_id, telegram_connected
+
+    @classmethod
+    def _normalize_reply(cls: type['MessageService'], text: str) -> str:
+        return text.replace('—', '-').replace('–', '-').strip()
 
     @classmethod
     async def cancel_message(
