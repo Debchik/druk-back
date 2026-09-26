@@ -7,9 +7,10 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.dao.boyfriend_dao import BoyfriendDao
-from app.database import async_session
+from app.database import async_engine, async_session
 from app.logging import logger
 from app.middleware import RequestLoggingMiddleware
+from app.models.base_model import Base
 from app.services.telegram_service import TelegramService
 from app.views.router import api_router
 from settings import config
@@ -25,6 +26,9 @@ class ApplicationLifecycle:
         polling_task = None
         stop_event = asyncio.Event()
         try:
+            async with async_engine.begin() as async_session:
+                main_app.state.db = async_session
+            logger.info('database_schema_ready')
             main_app.state.db = self.session_factory
             async with self.session_factory() as session:
                 await BoyfriendDao.ensure_default_pair(session)
