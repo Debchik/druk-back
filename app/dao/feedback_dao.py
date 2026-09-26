@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -87,3 +87,23 @@ class FeedbackDao:
             .group_by(Feedback.reaction)
         )
         return {reaction: int(count) for reaction, count in result.all()}
+
+    @classmethod
+    async def list_for_chat(
+        cls: type['FeedbackDao'],
+        db: AsyncSession,
+        user_id: UUID,
+        chat_id: UUID,
+        limit: int = 10,
+    ) -> List[Tuple[Feedback, Message]]:
+        result = await db.execute(
+            sa.select(Feedback, Message)
+            .join(Message, Message.id == Feedback.message_id)
+            .where(
+                Feedback.user_id == user_id,
+                Message.chat_id == chat_id,
+            )
+            .order_by(Feedback.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.all())
