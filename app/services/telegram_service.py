@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
+from app.dao.feedback_dao import FeedbackDao
+from app.dao.message_dao import MessageDao
 from app.dao.user_dao import UserDao
 from app.dao.onboarding_dao import OnboardingDao
 from app.dao.user_profile_dao import UserProfileDao
@@ -23,6 +25,7 @@ from app.services.message_service import MessageService
 from app.services.media_service import MediaService
 from app.services.onboarding_service import OnboardingService
 from app.services.rate_limit_service import RateLimitService
+from app.services.feedback_service import FeedbackService
 from settings import config
 
 
@@ -55,7 +58,13 @@ class TelegramService:
         return await ChatDao.commit(db, chat)
 
     @classmethod
-    async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    async def send_message(
+        cls: type['TelegramService'],
+        chat_id: int,
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> Optional[int]:
         if not config.telegram.bot_token:
             logger.warning('telegram_send_skipped reason=bot_token_missing')
             return None
@@ -68,7 +77,14 @@ class TelegramService:
             telegram_message_id = None
             for index, text_part in enumerate(text_parts):
                 current_markup = reply_markup if index == len(text_parts) - 1 else None
-                telegram_message_id = await asyncio.to_thread(cls._send_message, chat_id, text_part, current_markup)
+                current_reply_to = reply_to_message_id if index == 0 else None
+                telegram_message_id = await asyncio.to_thread(
+                    cls._send_message,
+                    chat_id,
+                    text_part,
+                    current_markup,
+                    current_reply_to,
+                )
         except Exception:
             logger.exception('telegram_send_failed chat_suffix=%s', str(chat_id)[-4:])
             raise
@@ -76,10 +92,18 @@ class TelegramService:
         return telegram_message_id
 
     @classmethod
-    def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> int:
+    def _send_message(
+        cls: type['TelegramService'],
+        chat_id: int,
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> int:
         payload: Dict[str, Any] = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup
+        if reply_to_message_id is not None:
+            payload['reply_parameters'] = {'message_id': reply_to_message_id}
         response = requests.post(
             f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage',
             json=payload,
@@ -111,6 +135,65 @@ class TelegramService:
         await asyncio.to_thread(cls._set_message_reaction, chat_id, message_id, emoji)
 
     @classmethod
+    async def send_sticker(
+        cls: type['TelegramService'],
+        chat_id: int,
+        sticker_file_id: str,
+        reply_to_message_id: Optional[int] = None,
+    ) -> Optional[int]:
+        if not config.telegram.bot_token or not sticker_file_id:
+            logger.warning('Отправка стикера пропущена: не настроен bot token или sticker file id')
+            return None
+        return await asyncio.to_thread(cls._send_sticker, chat_id, sticker_file_id, reply_to_message_id)
+
+    @classmethod
+    def _send_sticker(
+        cls: type['TelegramService'],
+        chat_id: int,
+        sticker_file_id: str,
+        reply_to_message_id: Optional[int],
+    ) -> int:
+        payload: Dict[str, Any] = {'chat_id': chat_id, 'sticker': sticker_file_id}
+        if reply_to_message_id is not None:
+            payload['reply_parameters'] = {'message_id': reply_to_message_id}
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendSticker',
+            json=payload,
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.error('Ошибка отправки стикера Telegram status=%s ответ=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
+        return int(response.json()['result']['message_id'])
+
+    @classmethod
+    async def send_typing(cls: type['TelegramService'], chat_id: int) -> None:
+        if not config.telegram.bot_token:
+            return
+        await asyncio.to_thread(cls._send_chat_action, chat_id)
+
+    @classmethod
+    async def typing_loop(cls: type['TelegramService'], chat_id: int) -> None:
+        try:
+            while True:
+                await cls.send_typing(chat_id)
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            raise
+
+    @classmethod
+    def _send_chat_action(cls: type['TelegramService'], chat_id: int) -> None:
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendChatAction',
+            json={'chat_id': chat_id, 'action': 'typing'},
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.warning('Не удалось показать статус печати Telegram status=%s', response.status_code)
+
+    @classmethod
     def _set_message_reaction(
         cls: type['TelegramService'],
         chat_id: int,
@@ -134,10 +217,55 @@ class TelegramService:
     @classmethod
     def _split_message(cls: type['TelegramService'], text: str) -> List[str]:
         max_length = 4096
-        if len(text) <= max_length:
-            return [text]
-        logger.warning('telegram_message_split text_chars=%s', len(text))
-        return [text[index:index + max_length] for index in range(0, len(text), max_length)]
+        normalized_text = text.replace('—', '-').replace('–', '-')
+        explicit_parts = [
+            part.strip()
+            for part in re.split(r'\s*(?:\[\[MESSAGE_BREAK\]\]|\n+)\s*', normalized_text)
+            if part.strip()
+        ]
+        if not explicit_parts:
+            explicit_parts = [normalized_text.strip()]
+        sentence_parts: List[str] = []
+        for explicit_part in explicit_parts:
+            parts = re.split(r'(?<![.!?,;])[.!?,;](?![.!?,;])\s+(?=[^\s])', explicit_part)
+            if len(parts) > 1:
+                last_part = parts[-1].strip()
+                if (
+                    len(last_part.split()) <= 2
+                    and last_part[:1].isupper()
+                    and re.search(r',\s*' + re.escape(last_part) + r'\s*$', explicit_part) is not None
+                ):
+                    parts = parts[:-1]
+            for part in parts:
+                clean_part = part.strip().rstrip('.,!?;')
+                if not clean_part:
+                    continue
+                sentence_parts.append(clean_part)
+        merged_parts: List[str] = []
+        for sentence_part in sentence_parts:
+            if merged_parts and cls._is_standalone_emoji(sentence_part):
+                merged_parts[-1] = f'{merged_parts[-1]} {sentence_part}'
+            else:
+                merged_parts.append(sentence_part)
+        result: List[str] = []
+        for sentence_part in merged_parts:
+            if len(sentence_part) <= max_length:
+                result.append(sentence_part)
+            else:
+                result.extend(
+                    sentence_part[index:index + max_length]
+                    for index in range(0, len(sentence_part), max_length)
+                )
+        if len(result) > 1:
+            logger.info('Ответ Telegram разделен на сообщения count=%s', len(result))
+        return result
+
+    @classmethod
+    def _is_standalone_emoji(cls: type['TelegramService'], text: str) -> bool:
+        value = text.strip()
+        if not value or len(value) > 8:
+            return False
+        return not any(character.isalnum() for character in value)
 
     @classmethod
     async def send_assistant_response(
@@ -147,8 +275,33 @@ class TelegramService:
         text: str,
         telegram_connected: bool,
         send_audio: bool = False,
+        reply_to_message_id: Optional[int] = None,
     ) -> Optional[int]:
-        telegram_message_id = await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
+        sticker_requested = '[[SEND_STICKER]]' in text or re.search(r'\[Стикер\]', text, flags=re.IGNORECASE) is not None
+        clean_text = text.replace('[[SEND_STICKER]]', '').strip()
+        clean_text = re.sub(r'\[Стикер\]', '', clean_text, flags=re.IGNORECASE).strip()
+        sticker_file_ids = [item.strip() for item in config.telegram.sticker_file_ids.split(',') if item.strip()]
+        if sticker_requested and sticker_file_ids:
+            telegram_message_id = None
+            if clean_text:
+                telegram_message_id = await cls.send_message(
+                    chat_id,
+                    clean_text,
+                    cls._connect_keyboard(telegram_connected),
+                    reply_to_message_id,
+                )
+            sticker_message_id = await cls.send_sticker(chat_id, secrets.choice(sticker_file_ids), reply_to_message_id)
+            if telegram_message_id is None:
+                telegram_message_id = sticker_message_id
+        else:
+            if sticker_requested and not sticker_file_ids:
+                logger.warning('Запрошен стикер, но TELEGRAM_STICKER_FILE_IDS не настроен')
+            telegram_message_id = await cls.send_message(
+                chat_id,
+                clean_text or text,
+                cls._connect_keyboard(telegram_connected),
+                reply_to_message_id,
+            )
         if send_audio:
             from app.tasks.speech_task import process_speech_task
 
@@ -230,6 +383,10 @@ class TelegramService:
     @classmethod
     async def process_update(cls: type['TelegramService'], db: AsyncSession, update: Dict[str, Any]) -> None:
         logger.info('telegram_update_received update_id=%s', update.get('update_id'))
+        callback_query = update.get('callback_query')
+        if callback_query is not None:
+            await cls._process_feedback_callback(db, update)
+            return
         reaction_update = update.get('message_reaction')
         if reaction_update is not None:
             reaction_chat_id = reaction_update.get('chat', {}).get('id')
@@ -301,6 +458,10 @@ class TelegramService:
             platform_url = f'{config.platform_url.rstrip("/")}/?telegram_link={raw_token}'
             await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard(False))
             return
+        if text.strip().lower() == '/feedback':
+            chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+            await cls._send_feedback_picker(db, telegram_chat_id, chat.id)
+            return
         text, audio_requested = cls._extract_audio_command(text)
         if not text and media_payload is None:
             await cls.send_message(
@@ -310,6 +471,7 @@ class TelegramService:
             )
             return
         try:
+            await cls.send_typing(telegram_chat_id)
             allowed, retry_after = await asyncio.to_thread(
                 RateLimitService.consume,
                 'telegram',
@@ -360,6 +522,7 @@ class TelegramService:
                     'audio': config.media.max_audio_bytes,
                     'image': config.media.max_image_bytes,
                     'video': config.media.max_video_bytes,
+                    'sticker': config.media.max_image_bytes,
                 }
                 media_data = await asyncio.to_thread(cls._download_file, file_id, media_limits[message_type])
                 _, _, task_id = await MediaService.create_asset_message(
@@ -410,9 +573,141 @@ class TelegramService:
 
     @classmethod
     def _connect_keyboard(cls: type['TelegramService'], connected: bool = False) -> Dict[str, Any]:
-        if connected:
+        if connected or not config.telegram.show_connect_button:
             return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
+
+    @classmethod
+    async def _send_feedback_picker(
+        cls: type['TelegramService'],
+        db: AsyncSession,
+        telegram_chat_id: int,
+        chat_id: UUID,
+    ) -> None:
+        messages = await MessageDao.list_recent_assistant_for_chat(db, chat_id, 5)
+        if not messages:
+            await cls.send_message(telegram_chat_id, 'Пока нет сообщений персонажа для оценки.')
+            return
+        rows = []
+        for message in messages:
+            snippet = ' '.join(message.content.split())[:10] or '[пусто]'
+            rows.append([{'text': snippet, 'callback_data': f'fb:m:{message.id}'}])
+        await cls.send_message(
+            telegram_chat_id,
+            'Выбери последнее сообщение персонажа, которое хочешь оценить:',
+            {'inline_keyboard': rows},
+        )
+
+    @classmethod
+    async def _process_feedback_callback(
+        cls: type['TelegramService'],
+        db: AsyncSession,
+        update: Dict[str, Any],
+    ) -> None:
+        callback_query = update.get('callback_query') or {}
+        callback_id = str(callback_query.get('id') or '')
+        callback_message = callback_query.get('message') or {}
+        telegram_chat_id = callback_message.get('chat', {}).get('id')
+        telegram_user_id = (callback_query.get('from') or {}).get('id')
+        data = str(callback_query.get('data') or '')
+        if telegram_chat_id is None or telegram_user_id is None:
+            return
+        user = await UserDao.get_by_telegram_id(db, int(telegram_user_id))
+        if user is None:
+            await cls._answer_callback_query(callback_id, 'Пользователь не найден')
+            return
+        chat = await ChatDao.get_for_platform(db, user.id, 'telegram')
+        if chat is None:
+            await cls._answer_callback_query(callback_id, 'Чат не найден')
+            return
+        parts = data.split(':')
+        try:
+            if len(parts) == 3 and parts[0] == 'fb' and parts[1] == 'm':
+                message_id = UUID(parts[2])
+                message = await FeedbackDao.get_message_for_user(db, user.id, chat.id, message_id)
+                if message is None:
+                    raise LookupError('Сообщение не найдено')
+                await cls._answer_callback_query(callback_id, 'Выбери оценку')
+                await cls.send_message(
+                    int(telegram_chat_id),
+                    f'Оцени ответ «{" ".join(message.content.split())[:10]}»:',
+                    {
+                        'inline_keyboard': [[
+                            {'text': '👍 Полезно', 'callback_data': f'fb:v:{message_id}:helpful'},
+                            {'text': '👎 Не полезно', 'callback_data': f'fb:v:{message_id}:not_helpful'},
+                        ]]
+                    },
+                )
+                return
+            if len(parts) == 4 and parts[0] == 'fb' and parts[1] == 'v':
+                message_id = UUID(parts[2])
+                reaction = parts[3]
+                if reaction == 'not_helpful':
+                    await cls._answer_callback_query(callback_id, 'Выбери причину')
+                    await cls.send_message(
+                        int(telegram_chat_id),
+                        'Что было не так?',
+                        cls._feedback_reason_keyboard(message_id),
+                    )
+                    return
+                await FeedbackService.save(db, user.id, chat.id, message_id, reaction, None)
+                await cls._answer_callback_query(callback_id, 'Оценка сохранена')
+                await cls.send_message(int(telegram_chat_id), 'Спасибо, я учту это в следующих ответах.')
+                return
+            if len(parts) == 4 and parts[0] == 'fb' and parts[1] == 'r':
+                message_id = UUID(parts[2])
+                reason = parts[3]
+                await FeedbackService.save(db, user.id, chat.id, message_id, 'not_helpful', reason)
+                await cls._answer_callback_query(callback_id, 'Оценка сохранена')
+                await cls.send_message(int(telegram_chat_id), 'Спасибо, я учту это в следующих ответах.')
+                return
+            raise ValueError('Некорректная кнопка feedback')
+        except (LookupError, ValueError) as error:
+            await cls._answer_callback_query(callback_id, str(error))
+            logger.warning('Telegram feedback отклонен причина=%s', error)
+
+    @classmethod
+    def _feedback_reason_keyboard(
+        cls: type['TelegramService'],
+        message_id: UUID,
+    ) -> Dict[str, Any]:
+        reasons = [
+            ('Не понял', 'not_understood'),
+            ('Слишком холодно', 'too_cold'),
+            ('Повторяется', 'repetitive'),
+            ('Небезопасно', 'unsafe'),
+            ('Не в характере', 'out_of_character'),
+        ]
+        return {
+            'inline_keyboard': [
+                [{'text': title, 'callback_data': f'fb:r:{message_id}:{reason}'}]
+                for title, reason in reasons
+            ]
+        }
+
+    @classmethod
+    async def _answer_callback_query(
+        cls: type['TelegramService'],
+        callback_id: str,
+        text: str,
+    ) -> None:
+        if not callback_id or not config.telegram.bot_token:
+            return
+        await asyncio.to_thread(cls._answer_callback_query_sync, callback_id, text)
+
+    @classmethod
+    def _answer_callback_query_sync(
+        cls: type['TelegramService'],
+        callback_id: str,
+        text: str,
+    ) -> None:
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/answerCallbackQuery',
+            json={'callback_query_id': callback_id, 'text': text[:200]},
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        response.raise_for_status()
 
     @classmethod
     def _extract_audio_command(cls: type['TelegramService'], text: str) -> Tuple[str, bool]:
@@ -432,9 +727,19 @@ class TelegramService:
         audio = message.get('audio')
         if audio is not None:
             return str(audio['file_id']), str(audio.get('mime_type') or 'audio/mpeg'), str(audio.get('file_name') or 'audio'), 'audio'
+        video_note = message.get('video_note')
+        if video_note is not None:
+            return str(video_note['file_id']), 'video/mp4', 'video_note.mp4', 'video'
         video = message.get('video')
         if video is not None:
             return str(video['file_id']), str(video.get('mime_type') or 'video/mp4'), str(video.get('file_name') or 'video.mp4'), 'video'
+        sticker = message.get('sticker')
+        if sticker is not None:
+            if sticker.get('is_video'):
+                return str(sticker['file_id']), 'video/webm', 'sticker.webm', 'sticker'
+            if sticker.get('is_animated'):
+                return str(sticker['file_id']), 'application/x-tgsticker', 'sticker.tgs', 'sticker'
+            return str(sticker['file_id']), 'image/webp', 'sticker.webp', 'sticker'
         photo = message.get('photo')
         if photo:
             image = photo[-1]
@@ -517,7 +822,7 @@ class TelegramService:
             params={
                 'offset': offset,
                 'timeout': config.telegram.polling_timeout,
-                'allowed_updates': json.dumps(['message', 'edited_message', 'message_reaction']),
+                'allowed_updates': json.dumps(['message', 'edited_message', 'message_reaction', 'callback_query']),
             },
             proxies=HttpClientFactory.get_requests_proxies('telegram'),
             timeout=config.telegram.polling_timeout + 10,
