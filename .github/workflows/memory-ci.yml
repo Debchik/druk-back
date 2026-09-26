@@ -59,4 +59,4 @@ jobs:
           assert '/api/v1/memory/facts/{fact_id}' in paths
           PY
       - name: Memory tests
-        run: PYTHONPATH=. pytest -q tests/test_memory_logic.py tests/test_memory_extraction_policy.py tests/test_safety_service.py tests/test_memory_fact_service.py tests/test_memory_fact_integration.py tests/test_media_quota_service.py
+        run: PYTHONPATH=. pytest -q tests/test_memory_logic.py tests/test_memory_extraction_policy.py tests/test_safety_service.py tests/test_memory_fact_service.py tests/test_memory_fact_integration.py tests/test_media_quota_service.py tests/test_media_quota_integration.py
