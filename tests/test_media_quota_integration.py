@@ -105,8 +105,9 @@ def test_new_user_image_quota_rejects_sixth_upload_and_persists_reply() -> None:
             assert assistant is not None
             assert assistant.content == error.value.user_message
 
+            # Deleting the user cascades chats/media. Keep the synthetic boyfriend
+            # row: chats do not cascade deletion from boyfriend -> chat.
             await db.delete(user)
-            await db.delete(boyfriend)
             await db.commit()
 
     asyncio.run(scenario())
@@ -141,8 +142,6 @@ def test_new_user_video_quota_is_one_but_existing_user_is_unlimited() -> None:
 
             await db.delete(limited_user)
             await db.delete(existing_user)
-            await db.delete(limited_boyfriend)
-            await db.delete(existing_boyfriend)
             await db.commit()
 
     asyncio.run(scenario())
