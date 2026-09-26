@@ -4,7 +4,9 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.chat import Chat
 from app.models.media_asset import MediaAsset
+from app.models.message import Message
 
 
 class MediaAssetDao:
@@ -41,6 +43,24 @@ class MediaAssetDao:
     @classmethod
     async def get_by_id(cls: type['MediaAssetDao'], db: AsyncSession, asset_id: UUID) -> Optional[MediaAsset]:
         return await db.scalar(sa.select(MediaAsset).where(MediaAsset.id == asset_id))
+
+    @classmethod
+    async def count_for_user_by_type(
+        cls: type['MediaAssetDao'],
+        db: AsyncSession,
+        user_id: UUID,
+        message_type: str,
+    ) -> int:
+        count = await db.scalar(
+            sa.select(sa.func.count(MediaAsset.id))
+            .join(Message, Message.id == MediaAsset.message_id)
+            .join(Chat, Chat.id == Message.chat_id)
+            .where(
+                Chat.user_id == user_id,
+                Message.message_type == message_type,
+            )
+        )
+        return int(count or 0)
 
     @classmethod
     async def mark_processing(cls: type['MediaAssetDao'], db: AsyncSession, asset: MediaAsset) -> MediaAsset:

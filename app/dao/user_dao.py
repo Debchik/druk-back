@@ -13,6 +13,18 @@ class UserDao:
         return await db.scalar(sa.select(User).where(User.id == user_id))
 
     @classmethod
+    async def get_by_id_for_update(
+        cls: type['UserDao'],
+        db: AsyncSession,
+        user_id: UUID,
+    ) -> Optional[User]:
+        return await db.scalar(
+            sa.select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+        )
+
+    @classmethod
     async def get_by_email(cls: type['UserDao'], db: AsyncSession, email: str) -> Optional[User]:
         return await db.scalar(sa.select(User).where(User.email == email))
 
@@ -52,6 +64,22 @@ class UserDao:
         user.telegram_id = telegram_id
         await db.flush()
         return user
+
+    @classmethod
+    async def increment_media_limit_rejection_count(
+        cls: type['UserDao'],
+        db: AsyncSession,
+        user_id: UUID,
+    ) -> int:
+        value = await db.scalar(
+            sa.update(User)
+            .where(User.id == user_id)
+            .values(media_limit_rejection_count=User.media_limit_rejection_count + 1)
+            .returning(User.media_limit_rejection_count)
+        )
+        if value is None:
+            raise LookupError('User not found')
+        return int(value)
 
     @classmethod
     async def delete(cls: type['UserDao'], db: AsyncSession, user: User) -> None:

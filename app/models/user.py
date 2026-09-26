@@ -17,4 +17,6 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(sa.String(120), nullable=True)
     telegram_id: Mapped[Optional[int]] = mapped_column(sa.BigInteger, unique=True, nullable=True)
     is_telegram_only: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    media_trial_limited: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    media_limit_rejection_count: Mapped[int] = mapped_column(sa.Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)
