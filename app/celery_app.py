@@ -7,13 +7,7 @@ celery_app = Celery(
     'ai_companion',
     broker=config.redis.url,
     backend=config.redis.url,
-    include=[
-        'app.tasks.message_task',
-        'app.tasks.media_task',
-        'app.tasks.speech_task',
-        'app.tasks.proactive_task',
-        'app.tasks.memory_task',
-    ],
+    include=['app.tasks.message_task', 'app.tasks.media_task', 'app.tasks.speech_task', 'app.tasks.proactive_task', 'app.tasks.memory_task'],
 )
 celery_app.conf.update(
     task_default_queue=config.celery.default_queue,
@@ -28,6 +22,12 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     task_track_started=True,
     task_time_limit=config.celery.task_time_limit_seconds,
+    broker_transport_options={
+        'visibility_timeout': config.celery.broker_visibility_timeout_seconds,
+    },
+    result_backend_transport_options={
+        'visibility_timeout': config.celery.broker_visibility_timeout_seconds,
+    },
     timezone='UTC',
     enable_utc=True,
     beat_schedule={
